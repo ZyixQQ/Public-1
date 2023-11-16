@@ -104,7 +104,8 @@ class Database:
                      bank_id, 
                      username, 
                      password, 
-                     email
+                     email,
+                     is_admin
                      ):
         '''
         This method creates a new user in database according to the parameters.
@@ -177,10 +178,8 @@ class Database:
         except Exception as e:
             print(e)
         response = self.cursor.fetchone()
-        if response:
-            return response
-        else:
-            return
+        
+        return response
 
     def perform_transfer(self, 
                          amount, 
@@ -284,7 +283,7 @@ class Bank:
         '''
         
         get_usernames_table = '''
-        SELECT username FROM users WHERE bank_id = ?
+        SELECT username, user_id FROM users WHERE bank_id = ?
         '''
 
         try:
@@ -298,22 +297,26 @@ class Bank:
         return self.database.cursor.fetchall()
 
     
-    def check_user(self, 
-                   username, 
-                   password
-                   ):
+    def verify_user(self, 
+                    username, 
+                    password,
+                    is_admin=None
+                    ):
         '''
         This module starts the process for user control.
+        Returns the User object if verified.
         '''
         
-        return self.database.authanticate_user(username,
-                                               password
-                                               )
+        response = self.database.authanticate_user(username,
+                                                   password
+                                                   )
+        return 1 if not response else User(self.database, *response, is_admin=True) if is_admin else User(self.database, *response)
 
     def create_new_user(self, 
                         username, 
                         password, 
-                        email
+                        email,
+                        is_admin=None
                         ):
         '''
         This module starts the process for creating new user.
@@ -322,7 +325,8 @@ class Bank:
         self.database.create_user(self.bank_id, 
                                   username, 
                                   password, 
-                                  email
+                                  email,
+                                  is_admin
                                   )
         return 0       
         

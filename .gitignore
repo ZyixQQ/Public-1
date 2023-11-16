@@ -1,5 +1,11 @@
-__pycache__/
 Database/
-
-*.db
+venv/
+.venv
+__pycache__/
+.idea/
+*.egg-info/
+htmlcov/
+dist/
+TODO.md
+.coverage
 

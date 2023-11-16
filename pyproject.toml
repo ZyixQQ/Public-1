@@ -1,0 +1,5 @@
+[tool.poetry]
+name = "CLI Bank-Simulator"
+version = "0.1.0"
+[tool.property.dependencies]
+python = "^3.10"

@@ -1,6 +1,7 @@
 Databases/
-Databases
+Logs/
 __pycache__/
 
-
+*.log
 *.db
+

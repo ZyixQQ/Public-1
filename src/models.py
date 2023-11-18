@@ -7,7 +7,73 @@ Manages database operations reletad to the bank, users, accounts and transaction
 
 import sqlite3
 from argon2 import PasswordHasher
-from decos import admin_required
+from decos import admin_required, login_required
+from loggers import info_logger
+
+
+
+class Session:
+    
+    def __init__(self, *, db, bank_id):
+        self.database = Database(db_path)
+        self.bank = Bank(self.database, bank_id
+        self.user = None
+        
+
+    def refresh(self):
+        system('clear') if os.name == 'posix' else system('cls')
+    
+
+    def login(self, username, password):
+        response = self.bank.verify_user(username, 
+                                         password
+                                         )
+        if response == 1:
+            print('Invalid username or password. Try Again.')
+    
+    def create_new_user(self, 
+                        username, 
+                        password, 
+                        email,
+                        bank_id,
+                        id_admin=None
+                        ):
+        '''
+        This module starts the process for creating new user.
+        '''
+        
+        self.database.create_user(bank_id, 
+                                  username, 
+                                  password, 
+                                  email,
+                                  is_admin
+                                  )
+        return 0        
+    
+    
+    @admin_required
+    def _all_user_data(self):
+        '''
+        This method starts a process that loads all users, accounts and account histories in the database. 
+        It is set for development process and controls.
+        '''
+        
+        users = []
+        search_users = '''
+        SELECT * FROM users WHERE bank_id = ?
+        '''
+        try:
+            self.database.cursor.execute(search_users, (self.bank_id,))
+            user_records = self.database.cursor.fetchall()
+            for user_record in user_records:
+                user = User(self.database, *user_record)
+                user._load_accounts()
+                users.append(user)
+        except Exception as e:
+            print(f'Error occured while extraction _all_user_data: {e}')
+        return users  
+
+
 
 
 
@@ -167,19 +233,18 @@ class Database:
         check_user_table = '''
         SELECT * FROM users WHERE username = ? AND password = ?;
         '''
-        
          
 
         try:
             self.cursor.execute(get_password_table, (username,))
             hashed_password = self.cursor.fetchone()[0]
+            user_exist = True if hashed_password else False
             self.hasher.verify(hashed_password, password)
             self.cursor.execute(check_user_table, (username, hashed_password))
         except Exception as e:
-            print(e)
+            print(f'Error occured while authenticate_user: {e}')
         response = self.cursor.fetchone()
-        
-        return response
+        return (user_exist, response)
 
     def perform_transfer(self, 
                          amount, 
@@ -235,7 +300,8 @@ class Database:
                                          ]):
                 self.cursor.execute(table, variables)
         except Exception as e:
-            print(e)
+            print(f'Error occured while perform_transfer: {e}')
+        
         self.conn.commit()
         return 0
 
@@ -256,26 +322,9 @@ class Bank:
         self.bank_id = bank_id
         self.users = self.get_usernames()
     
-    def _load_all_users(self):
-        '''
-        This method starts a process that loads all users, accounts and account histories in the database. 
-        It is set for development process and controls.
-        '''
-        
-        users = []
-        search_users = '''
-        SELECT * FROM users WHERE bank_id = ?
-        '''
-        try:
-            self.database.cursor.execute(search_users, (self.bank_id,))
-            user_records = self.database.cursor.fetchall()
-            for user_record in user_records:
-                user = User(self.database, *user_record)
-                user._load_accounts()
-                users.append(user)
-        except Exception as e:
-            print(e)
-        return users
+
+
+
     
     def get_usernames(self):
         '''
@@ -290,10 +339,8 @@ class Bank:
             self.database.cursor.execute(get_usernames_table, 
                                          (self.bank_id,)
                                          )
-        except sqlite3.IntegrityError as e:
-            print(e)
         except Exception as e:
-            print(e)
+            print(f'Error occured while get_usernames: {e}')
         return self.database.cursor.fetchall()
 
     
@@ -307,28 +354,14 @@ class Bank:
         Returns the User object if verified.
         '''
         
-        response = self.database.authanticate_user(username,
+        user_exist, response = self.database.authanticate_user(username,
                                                    password
                                                    )
-        return 1 if not response else User(self.database, *response, is_admin=True) if is_admin else User(self.database, *response)
+        if not response:
+            return 1 if user_exist else 2
+        return User(self.database, *response, is_admin=True) if is_admin else User(self.database, *response)
 
-    def create_new_user(self, 
-                        username, 
-                        password, 
-                        email,
-                        is_admin=None
-                        ):
-        '''
-        This module starts the process for creating new user.
-        '''
-        
-        self.database.create_user(self.bank_id, 
-                                  username, 
-                                  password, 
-                                  email,
-                                  is_admin
-                                  )
-        return 0       
+
         
     
     
@@ -344,7 +377,7 @@ class User:
                  bank_id, 
                  username, 
                  password, 
-                 email, 
+                 email,  
                  user_cd,
                  *,
                  is_admin=False
@@ -419,7 +452,7 @@ class User:
                                          (self.user_id,)
                                          )
         except Exception as e:
-            print(e)
+            print(f'Error occured while get_accounts')
         
         found_accounts = self.database.cursor.fetchall()
         
@@ -492,7 +525,7 @@ class Account:
                 transaction = Transaction(*transaction_record)
                 transactions.append(transaction)
         except Exception as e:
-             print(e)
+            print(f'Error occured while _load_transactions: {e}')
         return transactions
     
     def update_account(self):
@@ -511,7 +544,7 @@ class Account:
                                           )
                                          )
         except Exception as e:
-            print(e)
+            print(f'Error occured while update_account: {e}')
 
         else:
             self._balance = self.database.cursor.fetchone()[0]
@@ -567,3 +600,4 @@ class Transaction:
         return f'{self.transaction_id} | {self.transaction_type}: {self.amount} {self.transaction_date}'
         
         
+

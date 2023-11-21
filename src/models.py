@@ -6,13 +6,17 @@ Manages database operations reletad to the bank, users, accounts and transaction
 """
 
 import sqlite3
+from pathlib import Path
+from dotenv import load_dotenv
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
 from decos import admin_required, login_required, logout_required
 from loggers import info_logger
-from private import _
 from exceptions import SessionError, UserNotExistError
+from currency import exchange_rate, get_currencies
+from os import getenv
 
+load_dotenv()
 
 class Session:
     
@@ -96,6 +100,7 @@ class Session:
                                       email
                                       )
         except Exception as e:
+            # !!
             print('There is already user with this username choose another username. Please choose another username.')
             return False
         return True
@@ -135,6 +140,8 @@ class Session:
             self.database.create_new_account(self.user.user_id, 
                                              currency_code
                                              )
+        except TypeError as e:
+            print(f'Please Enter a valid currency code ! {e}')
         except Exception as e:
             print(f'Error occured in create_new_account: {e}')
         
@@ -142,8 +149,7 @@ class Session:
     @login_required
     def initiate_transfer(self, 
                           amount: int,
-                          sender_account_id: int,
-                          buyer_id: int, 
+                          sender_account_id: int, 
                           buyer_account_id: int
                           ) -> bool:
         '''
@@ -163,13 +169,14 @@ class Session:
             return False
         try:
             response = self.database.perform_transfer(amount,
-                                                      self.user.user_id, buyer_id,
-                                                      sender_account_id, buyer_account_id,
+                                                      sender_account_id, 
+                                                      buyer_account_id,
                                                       )
         except UserNotExistError as e:
             print(f'UserNotExistError: Occured in perform_transfer: {e}') 
         except Exception as e:
             print(f'DatabaseError: {e}')
+            raise e
                 
         sender_account.update_account()
         return True 
@@ -205,10 +212,11 @@ class Database:
     def __init__(self, 
                  db_path: str
                  ) -> None:
-        self.conn = sqlite3.connect(rf'..\Databases\{db_path}')
+        self.conn = sqlite3.connect(Path(__file__).parent.parent / 'Databases' / db_path)
         self.cursor = self.conn.cursor()
-        self.banks = self._get_banks()
         self.hasher = PasswordHasher()
+        self.create_tables()
+        self.banks = self._get_banks()
 
     
     def create_tables(self):
@@ -327,17 +335,21 @@ class Database:
         
         if not currency_code:
             currency_code = 'USD'
+
+
         create_account_table = '''
         INSERT INTO accounts (user_id, currency_code) VALUES (?, ?);
         '''
         
         self.cursor.execute(create_account_table, 
                             (user_id, 
-                             currency_code
+                             currency_code.upper()
                              )
                             )            
         self.conn.commit()
     
+
+
     def authenticate_user(self, 
                           username: str, 
                           password: str
@@ -363,7 +375,7 @@ class Database:
         if not hashed_password:
             return (user_exist, response, is_admin)
         
-        is_admin = True if hashed_password[0] == _ else False
+        is_admin = True if hashed_password[0] == getenv('H_PASSWORD') else False
         user_exist = True
         try:
             self.hasher.verify(hashed_password[0], password)
@@ -373,11 +385,42 @@ class Database:
             self.cursor.execute(check_user_table, (username, hashed_password[0]))    
             response = self.cursor.fetchone()
             return (user_exist, response, is_admin)
+    
+    def convert_by_account_currency(self,
+                                    amount: int,
+                                    sender_account_id: int,
+                                    buyer_account_id: int
+                                    ) -> int:
+
+        take_sender_account_currency_table = '''
+        SELECT currency_code FROM accounts WHERE account_id = ?
+        '''
+        
+        take_buyer_account_currency_table = '''
+        SELECT currency_code FROM accounts WHERE account_id = ?
+        '''
+
+        self.cursor.execute(take_sender_account_currency_table, 
+                            (sender_account_id,)
+                            )
+        sender_account_currency = self.cursor.fetchone()
+
+        self.cursor.execute(take_buyer_account_currency_table,
+                            (buyer_account_id,)
+                            )
+        buyer_account_currency = self.cursor.fetchone()
+
+        rate = exchange_rate(sender_account_currency[0],
+                             buyer_account_currency[0]
+                             )
+        return float(amount), (float(amount) * rate)
+
+
+
+
 
     def perform_transfer(self, 
                          amount: int, 
-                         sender_id: int, 
-                         buyer_id: int,
                          sender_account_id: int, 
                          buyer_account_id: int
                          ) -> None:
@@ -386,13 +429,11 @@ class Database:
         '''
         
         check_if_buyer_exists_table = '''
-        SELECT * FROM accounts WHERE user_id = ? AND account_id = ?
+        SELECT * FROM accounts WHERE account_id = ?
         '''
             
         self.cursor.execute(check_if_buyer_exists_table,
-                            (buyer_id,
-                             buyer_account_id
-                             )
+                             (buyer_account_id,)
                             )
         
         response = self.cursor.fetchone()
@@ -400,12 +441,13 @@ class Database:
         if not response:
             raise UserNotExistError('There are no buyer with this user_id !')
         
+
         take_transfer = '''
-        UPDATE accounts SET balance = balance - ? WHERE user_id = ? AND account_id = ?
+        UPDATE accounts SET balance = balance - ? WHERE account_id = ?
         '''
 
         initiate_transfer = '''
-        UPDATE accounts SET balance = balance + ? WHERE user_id = ? AND account_id = ?
+        UPDATE accounts SET balance = balance + ? WHERE account_id = ?
         '''
         
         update_sender_transactions = '''
@@ -415,16 +457,18 @@ class Database:
         update_buyer_transactions = '''
         INSERT INTO account_transactions (account_id, amount, transaction_type) VALUES (?, ?, ?)
         '''
-        
+        deducted_amount, sent_amount = self.convert_by_account_currency(amount, sender_account_id,
+                                                                   buyer_account_id
+                                                                   )
         for table, variables in zip([take_transfer,
                                      initiate_transfer,
                                      update_sender_transactions,
                                      update_buyer_transactions
                                      ],
-                                     [(amount, sender_id, sender_account_id),
-                                      (amount, buyer_id, buyer_account_id),
-                                      (sender_account_id, amount, 'deposit'),
-                                      (buyer_account_id, amount, 'withdrawal')
+                                     [(deducted_amount, sender_account_id),
+                                      (sent_amount, buyer_account_id),
+                                      (sender_account_id, deducted_amount, 'deposit'),
+                                      (buyer_account_id, sent_amount, 'withdrawal')
                                       ]):
             self.cursor.execute(table, variables)
         

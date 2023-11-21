@@ -32,4 +32,19 @@ def logout_required(func):
     return wrapper
 
 
+def limit_by_second(second):
+    
+    def decorator(func):
+        cached_data = None
+        last_time_call = 0
         
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            nonlocal last_time_call, cached_data
+            if ((t := time.time()) - last_time_call) >= second:
+                last_time_call = t
+                cached_data = func(*args, **kwargs)
+            
+            return cached_data
+        return wrapper
+    return decorator        

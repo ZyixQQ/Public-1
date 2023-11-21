@@ -4,4 +4,5 @@ __pycache__/
 
 *.log
 *.db
-private.py
+.env
+

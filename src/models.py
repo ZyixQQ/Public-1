@@ -7,15 +7,14 @@ Manages database operations reletad to the bank, users, accounts and transaction
 
 import sqlite3
 from pathlib import Path
-from dotenv import load_dotenv
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
-from decos import admin_required, login_required, logout_required
+from decos import admin_required, login_required, logout_required, manage_loading
 from loggers import info_logger
 from exceptions import SessionError, UserNotExistError
 from currency import exchange_rate, get_currencies
 from os import getenv
-
+from dotenv import load_dotenv
 load_dotenv()
 
 class Session:
@@ -31,7 +30,7 @@ class Session:
         self.user = None
         
     
-
+    @manage_loading(5, 'Verifying User')
     @logout_required
     def login(self, 
               username: str, 
@@ -40,18 +39,19 @@ class Session:
         '''
         This function simulates the user logging in.
         '''
-        user_exist, response, is_admin = self.database.authenticate_user(username, 
-                                                                         password
-                                                                         )
-        if not response:
-            print('Invalid password. Try Again.')
+        
+        user_exist, response, is_admin = self.database.db_authenticate_user(username, 
+                                                                            password
+                                                                            )
+        if not user_exist:
+            print('\rInvalid username: There are no user with this username !')
             return False
-        elif not user_exist:
-            print('Invalid username: There are no user with this username !')
+        elif not response:
+            print('\rInvalid password: Try again !')
             return False
         else:
-            print('Login, please wait...')
             self.user = User(self.database, *response, is_admin=True) if is_admin else User(self.database, *response)
+            print('\rSuccesfully verified, logged in.')
             return True
         
             
@@ -84,28 +84,28 @@ class Session:
             return True
 
 
-    def create_new_user(self,
-                        username: str, 
-                        password: str, 
-                        email: str
-                        ) -> bool:
+    def create_user(self,
+                    username: str, 
+                    password: str, 
+                    email: str
+                    ) -> bool:
         '''
         This module starts the process for creating new user.
         '''
 
         try:
-            self.database.create_user(self.bank.bank_id, 
-                                      username, 
-                                      password, 
-                                      email
-                                      )
+            self.database.db_create_user(self.bank.bank_id, 
+                                         username, 
+                                         password, 
+                                         email
+                                         )
         except Exception as e:
-            # !!
-            print('There is already user with this username choose another username. Please choose another username.')
+            print('There is already a user with this username please choose another username.')
             return False
-        return True
+        print(f'New user created -> {username}')
     
     
+    @manage_loading(5, 'Extracting all user data')   
     @admin_required
     def _all_user_data(self) -> list:
         '''
@@ -127,7 +127,7 @@ class Session:
         except Exception as e:
             print(f'Error occured while extracting _all_user_data: {e}')
         return users
-
+    
     @login_required
     def create_account(self, 
                        currency_code: str = None
@@ -137,15 +137,16 @@ class Session:
         '''
         
         try:
-            self.database.create_new_account(self.user.user_id, 
-                                             currency_code
-                                             )
+            self.database.db_create_account(self.user.user_id, 
+                                            currency_code
+                                            )
+
         except TypeError as e:
             print(f'Please Enter a valid currency code ! {e}')
         except Exception as e:
             print(f'Error occured in create_new_account: {e}')
         
-
+    @manage_loading(5, 'Transfer in progress')
     @login_required
     def initiate_transfer(self, 
                           amount: int,
@@ -168,10 +169,10 @@ class Session:
             print('You dont have enough money to perform this operation !')
             return False
         try:
-            response = self.database.perform_transfer(amount,
-                                                      sender_account_id, 
-                                                      buyer_account_id,
-                                                      )
+            response = self.database.db_perform_transfer(amount,
+                                                         sender_account_id, 
+                                                         buyer_account_id,
+                                                         )
         except UserNotExistError as e:
             print(f'UserNotExistError: Occured in perform_transfer: {e}') 
         except Exception as e:
@@ -215,11 +216,11 @@ class Database:
         self.conn = sqlite3.connect(Path(__file__).parent.parent / 'Databases' / db_path)
         self.cursor = self.conn.cursor()
         self.hasher = PasswordHasher()
-        self.create_tables()
-        self.banks = self._get_banks()
+        self.db_create_tables()
+        self.banks = self._db_get_banks()
 
     
-    def create_tables(self):
+    def db_create_tables(self):
         '''
         This method creates required tables and applies initial actions.
         '''
@@ -288,7 +289,7 @@ class Database:
         self.conn.commit()
     
     
-    def _get_banks(self) -> list:
+    def _db_get_banks(self) -> list:
         '''
         This function returns all bank datas from the Database.
         '''
@@ -300,7 +301,7 @@ class Database:
         return self.cursor.fetchall()
 
 
-    def create_user(self, 
+    def db_create_user(self, 
                     bank_id: int, 
                     username: str, 
                     password: str, 
@@ -325,10 +326,11 @@ class Database:
         self.cursor.execute(create_account, (user_id,))
         self.conn.commit()
     
-    def create_new_account(self, 
-                           user_id: int, 
-                           currency_code: str
-                           ) -> None:
+    
+    def db_create_account(self, 
+                          user_id: int, 
+                          currency_code: str
+                          ) -> None:
         '''
         This method creates a new account for the user corresponding to the user_id parameter.
         '''
@@ -350,10 +352,10 @@ class Database:
     
 
 
-    def authenticate_user(self, 
-                          username: str, 
-                          password: str
-                          ) -> tuple:
+    def db_authenticate_user(self, 
+                             username: str, 
+                             password: str
+                             ) -> tuple:
         '''
         This module compares the given username and password with the data in database.
         Returns all user data if the user corresponding to the username exists and the password is correct.
@@ -386,12 +388,17 @@ class Database:
             response = self.cursor.fetchone()
             return (user_exist, response, is_admin)
     
-    def convert_by_account_currency(self,
-                                    amount: int,
-                                    sender_account_id: int,
-                                    buyer_account_id: int
-                                    ) -> int:
-
+    def db_convert_by_account_currency(self,
+                                       amount: int,
+                                       sender_account_id: int,
+                                       buyer_account_id: int
+                                       ) -> int:
+        '''
+        This method compares the account currencies of the giver and 
+        the receiver with the current financial data provided by the 
+        exchange_rate method and returns the amount due from the giver 
+        and the amount due to the receiver.
+        '''
         take_sender_account_currency_table = '''
         SELECT currency_code FROM accounts WHERE account_id = ?
         '''
@@ -413,17 +420,17 @@ class Database:
         rate = exchange_rate(sender_account_currency[0],
                              buyer_account_currency[0]
                              )
-        return float(amount), (float(amount) * rate)
+        return round(amount, 2), round(float(amount) * rate, 2)
 
 
 
 
 
-    def perform_transfer(self, 
-                         amount: int, 
-                         sender_account_id: int, 
-                         buyer_account_id: int
-                         ) -> None:
+    def db_perform_transfer(self, 
+                            amount: int, 
+                            sender_account_id: int, 
+                            buyer_account_id: int
+                            ) -> None:
         '''
         This method exchanges money and updates the data in the database accordingly.
         '''
@@ -457,9 +464,9 @@ class Database:
         update_buyer_transactions = '''
         INSERT INTO account_transactions (account_id, amount, transaction_type) VALUES (?, ?, ?)
         '''
-        deducted_amount, sent_amount = self.convert_by_account_currency(amount, sender_account_id,
-                                                                   buyer_account_id
-                                                                   )
+        deducted_amount, sent_amount = self.db_convert_by_account_currency(amount, sender_account_id,
+                                                                           buyer_account_id
+                                                                           )
         for table, variables in zip([take_transfer,
                                      initiate_transfer,
                                      update_sender_transactions,
@@ -608,6 +615,7 @@ class User:
         try:
             self.database.cursor.execute(search_accounts, (self.user_id,))
             account_records = self.database.cursor.fetchall()
+            print(account_records)
             for account_record in account_records:
                 account = Account(self.database, *account_record)
                 accounts.append(account)

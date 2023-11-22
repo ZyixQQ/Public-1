@@ -5,6 +5,9 @@ from loggers import error_logger, info_logger
 
 
 class SessionError(Exception):
+    '''
+    This error class is used when there is an error related to sessions (login, logout, etc.).
+    '''
     def __init__(self, message='Session Error: You need to log in for perform this operation !', error_code=None):
         self.message = message
         self.error_code = error_code
@@ -20,6 +23,9 @@ class SessionError(Exception):
 
 
 class UserNotExistError(Exception):
+    '''
+    This error class is used when there are no users to process.
+    '''
     def __init__(self, message='UserNotExistError: Given username, password or id is wrong, specified user couldnt found !', error_code=None):
         self.message = message
         self.error_code = error_code

@@ -17,6 +17,9 @@ BASE_URL = 'https://api.freecurrencyapi.com'
 
 @limit_by_second(100)
 def get_currencies():
+    '''
+    This method makes an api request and provides up-to-date financial data.
+    '''
     endpoint = '/v1/currencies?apikey={API_KEY}'
     url = BASE_URL + endpoint
     response = get(url).json()['data']
@@ -28,6 +31,10 @@ def get_currencies():
 
 
 def exchange_rate(currency1, currency2):
+    '''
+    This method compares given currencies and returns exchange rate between them.
+    Basicly: 1 currency1 = exchange_rate(currency1, curency2) curency2
+    '''
     endpoint = f'/v1/latest?apikey={API_KEY}&currencies={currency2}&base_currency={currency1}'
     url = BASE_URL + endpoint
     response = get(url).json()['data']

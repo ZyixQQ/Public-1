@@ -103,10 +103,10 @@ def manage_loading(duration, text):
                                           )
                                     )
             loading_thread.start()
-            func(*args, **kwargs)
+            result = func(*args, **kwargs)
             process_ready_event.set()
             loading_thread.join()
-            
+            return result
         return wrapper
     return decorator
             

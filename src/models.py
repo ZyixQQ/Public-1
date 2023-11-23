@@ -22,11 +22,10 @@ class Session:
     def __init__(self, 
                  *, 
                  db_path: str = 'bank_manage.db', 
-                 bank_id: int
                  ) -> None:
 
         self.database = Database(db_path)
-        self.bank = Bank(self.database, bank_id)
+        self.bank = None
         self.user = None
         
     
@@ -39,22 +38,18 @@ class Session:
         '''
         This function simulates the user logging in.
         '''
-        
         user_exist, response, is_admin = self.database.db_authenticate_user(username, 
                                                                             password
                                                                             )
         if not user_exist:
-            print('\rInvalid username: There are no user with this username !')
-            return False
+            return False, '\rInvalid username: There are no user with this username !'
+            
         elif not response:
-            print('\rInvalid password: Try again !')
-            return False
+            return False, '\rInvalid password: Try again !'
         else:
             self.user = User(self.database, *response, is_admin=True) if is_admin else User(self.database, *response)
-            print('\rSuccesfully verified, logged in.')
-            return True
-        
-            
+            return True, '\rSuccesfully verified, logged in.'
+                
 
     @login_required
     def logout(self) -> None:
@@ -65,21 +60,21 @@ class Session:
         self.user = None
     
     @logout_required
-    def switch_bank(self, 
-                    bank_id: int
-                    ) -> bool:
+    def set_bank(self, 
+                 bank_id: int
+                 ) -> bool:
         '''
         This function allows user to switch banks in order to perform another operations
         '''
 
-        exist_bank_ids = [bank.bank_id for bank in self.database.banks]
+        exist_bank_ids = [bank[0] for bank in self.database.banks]
         
         if bank_id not in exist_bank_ids:
             print('There is no bank with this id.')
             return False
         else:
             self.database.conn.commit()
-            self.bank = Bank(db_path=self._db_path,
+            self.bank = Bank(database=self.database,
                              bank_id=bank_id)
             return True
 
@@ -99,9 +94,11 @@ class Session:
                                          password, 
                                          email
                                          )
-        except Exception as e:
+        except sqlite3.IntegrityError:
             print('There is already a user with this username please choose another username.')
             return False
+        except Exception as e:
+            print(f'Error occured while creating new user: {e}')
         print(f'New user created -> {username}')
     
     
@@ -217,7 +214,10 @@ class Database:
         self.cursor = self.conn.cursor()
         self.hasher = PasswordHasher()
         self.db_create_tables()
-        self.banks = self._db_get_banks()
+    
+    @property
+    def banks(self):
+        return self._db_get_banks()
 
     
     def db_create_tables(self):
@@ -496,7 +496,10 @@ class Bank:
                  ) -> None:
         self.database = database
         self.bank_id = bank_id
-        self.users = self._get_usernames()
+    
+    @property
+    def users(self):
+        return _get_usernames()
     
 
 
@@ -547,14 +550,17 @@ class User:
         self.password = password
         self.email = email
         self.user_cd = user_cd
-        self.accounts = self._load_accounts()
         self.is_admin = is_admin
     
 
     def __repr__(self) -> str:
         return f'{self.bank_id}|{self.user_id} | {self.username}'
     
-     
+    
+    @property
+    def accounts(self):
+        return self._load_accounts()
+
     @admin_required
     def _prepare(self) -> None:
         '''
@@ -615,7 +621,6 @@ class User:
         try:
             self.database.cursor.execute(search_accounts, (self.user_id,))
             account_records = self.database.cursor.fetchall()
-            print(account_records)
             for account_record in account_records:
                 account = Account(self.database, *account_record)
                 accounts.append(account)

@@ -154,9 +154,6 @@ def start_interface():
     bank_id = int(input('|| Choose a bank id -> '))
     session.connect_bank(bank_id)
 
-Menu.starter()
-start_interface()
-main_menu()
 
 
 

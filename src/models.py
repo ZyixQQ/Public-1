@@ -29,7 +29,7 @@ class Session:
         self.user = None
         
     
-    @manage_loading(5, 'Verifying User')
+    @manage_loading(5, '|| Verifying User')
     @logout_required
     def login(self, 
               username: str, 
@@ -38,17 +38,18 @@ class Session:
         '''
         This function simulates the user logging in.
         '''
-        user_exist, response, is_admin = self.database.db_authenticate_user(username, 
+        user_exist, response, is_admin = self.database.db_authenticate_user(self.bank.bank_id,
+                                                                            username, 
                                                                             password
                                                                             )
         if not user_exist:
-            return False, '\rInvalid username: There are no user with this username !'
+            return False, '\r\\\\ ! Invalid username: There are no user with this username in this Bank.'
             
         elif not response:
-            return False, '\rInvalid password: Try again !'
+            return False, '\r|| ! Invalid password: Try again.'
         else:
             self.user = User(self.database, *response, is_admin=True) if is_admin else User(self.database, *response)
-            return True, '\rSuccesfully verified, logged in.'
+            return True, '\r|| + Succesfully verified, logged in.'
                 
 
     @login_required
@@ -60,9 +61,9 @@ class Session:
         self.user = None
     
     @logout_required
-    def set_bank(self, 
-                 bank_id: int
-                 ) -> bool:
+    def connect_bank(self, 
+                     bank_id: int
+                     ) -> bool:
         '''
         This function allows user to switch banks in order to perform another operations
         '''
@@ -70,7 +71,7 @@ class Session:
         exist_bank_ids = [bank[0] for bank in self.database.banks]
         
         if bank_id not in exist_bank_ids:
-            print('There is no bank with this id.')
+            print('|| There is no bank with this id.')
             return False
         else:
             self.database.conn.commit()
@@ -78,7 +79,7 @@ class Session:
                              bank_id=bank_id)
             return True
 
-
+    @manage_loading(5, '|| Creating User')
     def create_user(self,
                     username: str, 
                     password: str, 
@@ -95,14 +96,14 @@ class Session:
                                          email
                                          )
         except sqlite3.IntegrityError:
-            print('There is already a user with this username please choose another username.')
+            return False, '\\\\ ! There is already a user with this username please choose another username.'
             return False
         except Exception as e:
-            print(f'Error occured while creating new user: {e}')
-        print(f'New user created -> {username}')
+            return False, f'\\\\ ! Error occured while creating new user: {e}'
+        return True, f'\\\\ + New user created -> {username}'
     
     
-    @manage_loading(5, 'Extracting all user data')   
+    @manage_loading(5, '|| Extracting all user data')   
     @admin_required
     def _all_user_data(self) -> list:
         '''
@@ -122,7 +123,7 @@ class Session:
                 user._load_accounts()
                 users.append(user)
         except Exception as e:
-            print(f'Error occured while extracting _all_user_data: {e}')
+            print(f'|| Error occured while extracting _all_user_data: {e}')
         return users
     
     @login_required
@@ -198,7 +199,39 @@ class Session:
         except Exception as e:
             print(f'AdminPrcocessError: {e}')
 
-
+    @login_required
+    def send_message(self,
+                     message_type: str,
+                     message_context: str,
+                     receiver_id: int
+                     ):
+        templates = {
+            'request': 'User with id {id}, named {name}, demands <{amount}> units of money for his account with id <{account_id}> from you: {message}',
+            'message' : 'User with id {id}, named {name} has a message for you: {message}'  
+        }
+        
+        send_message_table = '''
+        INSERT INTO user_messages (user_id, sender_id, message_type, message_context) VALUES (?, ?, ?, ?);
+        '''
+        
+        self.database.cursor.execute(send_message_table,
+                                     (receiver_id,
+                                      self.user.user_id,
+                                      message_type,
+                                      templates.get(message_type.lower()).format(id=self.user.user_id, name=self.user.username, **message_context)
+                                      )
+                                     )
+        self.database.conn.commit()
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
 
 
 class Database:
@@ -213,6 +246,7 @@ class Database:
         self.conn = sqlite3.connect(Path(__file__).parent.parent / 'Databases' / db_path)
         self.cursor = self.conn.cursor()
         self.hasher = PasswordHasher()
+        self.db_path = db_path
         self.db_create_tables()
     
     @property
@@ -265,10 +299,20 @@ class Database:
         	amount DECIMAL(10, 2),
         	transaction_type VARCHAR(50) NOT NULL,
         	transaction_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        	FOREIGN KEY (account_id)  REFERENCES accounts(account_id)
+        	FOREIGN KEY (account_id) REFERENCES accounts(account_id)
         );
         '''
-        
+        create_user_messagebox_table = '''
+        CREATE TABLE IF NOT EXISTS user_messages (
+            message_id INTEGER,
+            user_id INTEGER,
+            sender_id INTEGER,
+            message_type TEXT,
+            message_context TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(user_id)
+            PRIMARY KEY("message_id" AUTOINCREMENT)
+        );
+        '''
         create_starter_banks = '''
         INSERT INTO banks (bank_name) VALUES ('Bank1'), ('Bank2'), ('Bank3');
         '''
@@ -277,6 +321,7 @@ class Database:
                           create_users_table,
                           create_accounts_table,
                           create_account_transaction_table,
+                          create_user_messagebox_table
                           ):
                 self.cursor.execute(table)
             self.cursor.execute('SELECT * FROM banks;')
@@ -284,7 +329,7 @@ class Database:
                 self.cursor.execute(create_starter_banks)
                 
         except Exception as e:
-            print('Something went wrong while creating tables, please be sure that you are using correct database path.')
+            print(f'Something went wrong while creating tables, please be sure that you are using correct database path.')
 
         self.conn.commit()
     
@@ -353,6 +398,7 @@ class Database:
 
 
     def db_authenticate_user(self, 
+                             bank_id: int,
                              username: str, 
                              password: str
                              ) -> tuple:
@@ -362,7 +408,7 @@ class Database:
         '''
 
         get_password_table = '''
-        SELECT password FROM users WHERE username = ?;
+        SELECT password FROM users WHERE username = ? AND bank_id = ?;
         '''
 
         check_user_table = '''
@@ -371,7 +417,7 @@ class Database:
          
         user_exist, response, is_admin = None, None, None
         
-        self.cursor.execute(get_password_table, (username,))
+        self.cursor.execute(get_password_table, (username, bank_id))
         hashed_password = self.cursor.fetchone()
 
         if not hashed_password:
@@ -499,7 +545,7 @@ class Bank:
     
     @property
     def users(self):
-        return _get_usernames()
+        return self._get_usernames()
     
 
 
@@ -551,11 +597,11 @@ class User:
         self.email = email
         self.user_cd = user_cd
         self.is_admin = is_admin
+        self.messages = self._load_messages()
     
 
     def __repr__(self) -> str:
         return f'{self.bank_id}|{self.user_id} | {self.username}'
-    
     
     @property
     def accounts(self):
@@ -617,17 +663,26 @@ class User:
         search_accounts = '''
         SELECT * FROM accounts WHERE user_id = ?
         '''
+        self.database.cursor.execute(search_accounts, (self.user_id,))
+        account_records = self.database.cursor.fetchall()
+        for account_record in account_records:
+            account = Account(self.database, *account_record)
+            accounts.append(account)
 
-        try:
-            self.database.cursor.execute(search_accounts, (self.user_id,))
-            account_records = self.database.cursor.fetchall()
-            for account_record in account_records:
-                account = Account(self.database, *account_record)
-                accounts.append(account)
-        except Exception as e:
-            print(e)
         return accounts
-
+        
+    def _load_messages(self) -> list:
+        
+        search_messages = '''
+        SELECT * FROM user_messages WHERE user_id = ?
+        '''
+        self.database.cursor.execute(search_messages, (self.user_id,))
+        return self.database.cursor.fetchall()
+        
+            
+        
+        
+    
 class Account:
     '''
     This class is for accounts that users create specific to their currency (USD by default).

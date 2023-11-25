@@ -15,6 +15,7 @@ from exceptions import SessionError, UserNotExistError
 from currency import exchange_rate, get_currencies
 from os import getenv
 from dotenv import load_dotenv
+from re import findall
 load_dotenv()
 
 class Session:
@@ -27,6 +28,8 @@ class Session:
         self.database = Database(db_path)
         self.bank = None
         self.user = None
+        self.payload = {}
+
         
     
     @manage_loading(5, '|| Verifying User')
@@ -38,10 +41,13 @@ class Session:
         '''
         This function simulates the user logging in.
         '''
-        user_exist, response, is_admin = self.database.db_authenticate_user(self.bank.bank_id,
+        try:
+            user_exist, response, is_admin = self.database.db_authenticate_user(self.bank.bank_id,
                                                                             username, 
                                                                             password
                                                                             )
+        except TypeError:
+            input('|| ! Please make sure you entered connected a valid exist bank')
         if not user_exist:
             return False, '\r\\\\ ! Invalid username: There are no user with this username in this Bank.'
             
@@ -49,6 +55,7 @@ class Session:
             return False, '\r|| ! Invalid password: Try again.'
         else:
             self.user = User(self.database, *response, is_admin=True) if is_admin else User(self.database, *response)
+            self.check_user_cache()
             return True, '\r|| + Succesfully verified, logged in.'
                 
 
@@ -57,20 +64,55 @@ class Session:
         '''
         This function simulates the user logging out.
         '''
+        check_users_cache = '''
+        SELECT * FROM user_cache WHERE user_id = ?
+        '''
+        create_user_cache_table = '''
+        INSERT INTO user_cache (user_id, message_count) VALUES (?, ?);
+        '''
+        update_user_cache_table = '''
+        UPDATE user_cache SET message_count = ? WHERE user_id = ?;
+        '''
+        
+        self.database.cursor.execute(check_users_cache,
+                                     (self.user.user_id,)
+                                     )
+        if self.database.cursor.fetchone() is None:
+            self.database.cursor.execute(create_user_cache_table,
+                                         (self.user.user_id, len(self.user.messages)))
+        else:
+            self.database.cursor.execute(update_user_cache_table,
+                                (len(self.user.messages), self.user.user_id))
+                                
         self.database.conn.commit()
         self.user = None
     
+    def check_user_cache(self):
+        check_users_cache = '''
+        SELECT message_count FROM user_cache WHERE user_id = ?
+        '''
+        self.database.cursor.execute(check_users_cache,
+                            (self.user.user_id,)
+                            )
+        message_count = self.database.cursor.fetchone()
+        if not message_count:
+            self.payload['message'] = ''
+        elif message_count[0] < len(self.user.messages):
+            self.payload['message'] = f'You have {len(self.user.messages) - message_count[0]} new message.'
+        else:
+            self.payload['message'] = ''
+            
+        
+    
     @logout_required
-    def connect_bank(self, 
+    def connect_bank(self,  
                      bank_id: int
                      ) -> bool:
         '''
         This function allows user to switch banks in order to perform another operations
         '''
-
-        exist_bank_ids = [bank[0] for bank in self.database.banks]
         
-        if bank_id not in exist_bank_ids:
+        if bank_id not in self.database.banks.keys():
             print('|| There is no bank with this id.')
             return False
         else:
@@ -133,18 +175,20 @@ class Session:
         '''
         This method starts the creating new account process.
         '''
-        
-        try:
-            self.database.db_create_account(self.user.user_id, 
-                                            currency_code
-                                            )
+        if len(self.user.accounts) <= 5:
+            try:
+                self.database.db_create_account(self.user.user_id, 
+                                                currency_code
+                                                )
 
-        except TypeError as e:
-            print(f'Please Enter a valid currency code ! {e}')
-        except Exception as e:
-            print(f'Error occured in create_new_account: {e}')
+            except TypeError as e:
+                return False, f'Please Enter a valid currency code ! {e}'
+            except Exception as e:
+                print(f'Error occured in create_new_account: {e}')
+        else:
+            raise ValueError('Reached the account limit')
         
-    @manage_loading(5, 'Transfer in progress')
+    @manage_loading(5, '|| Transfer in progress')
     @login_required
     def initiate_transfer(self, 
                           amount: int,
@@ -156,7 +200,7 @@ class Session:
         '''
         sender_account = None
 
-        for account in self.user.accounts:
+        for account in self.user.accounts.values():
             if account.account_id == sender_account_id:
                 sender_account = account
 
@@ -206,33 +250,117 @@ class Session:
                      receiver_id: int
                      ):
         templates = {
-            'request': 'User with id {id}, named {name}, demands <{amount}> units of money for his account with id <{account_id}> from you: {message}',
-            'message' : 'User with id {id}, named {name} has a message for you: {message}'  
+            'request': 'User with id <{id}>, named <{name}>, is requesting <{amount}-{currency_code}> for their account with id <{account_id}> from you. Message: {message}',
+            'message' : 'User with id <{id}> named {name} has a message for you. Message: {message}'  
         }
         
         send_message_table = '''
-        INSERT INTO user_messages (user_id, sender_id, message_type, message_context) VALUES (?, ?, ?, ?);
+        INSERT INTO user_messages (user_id, sender_id, sender_name, message_type, message_context) VALUES (?, ?, ?, ?, ?);
         '''
         
         self.database.cursor.execute(send_message_table,
                                      (receiver_id,
                                       self.user.user_id,
+                                      self.user.username,
                                       message_type,
-                                      templates.get(message_type.lower()).format(id=self.user.user_id, name=self.user.username, **message_context)
+                                      templates.get(message_type.lower()).format(id=self.user.user_id, 
+                                                                                 name=self.user.username, 
+                                                                                 **message_context
+                                                                                 )
                                       )
                                      )
         self.database.conn.commit()
+    
+    @login_required
+    def extract_request_information(self, request_id):
+        request_information = {}
+        accepted_request = self.user.messages.get(request_id)
+        message = accepted_request[-1]
+        pattern = r'<(.*?)>'
+        extracted_info = findall(pattern, message) 
         
+        request_information['requestor_id'] = int(extracted_info[0])
+        request_information['requestor_amount'] = int(extracted_info[2].split('-')[0])
+        request_information['requestor_currency_code'] = extracted_info[2].split('-')[1]
+        request_information['requestor_account_id'] = int(extracted_info[3])
+        request_information['requestor_name'] = extracted_info[1]
+        return request_information
         
-        
-        
-        
-        
-        
-        
-        
-        
+    
 
+    @login_required
+    def accept_request(self, 
+                       request_id, 
+                       sender_account_id
+                       ):       
+        request_info = self.extract_request_information(request_id)
+        sender_account = self.user.accounts.get(int(sender_account_id))
+        sender_account_currency_code = sender_account.currency_code
+        sender_account_balance = sender_account._balance
+        
+        if sender_account_currency_code != request_info.get('requestor_currency_code'):
+            rate = exchange_rate(request_info.get('requestor_currency_code'),
+                                 sender_account_currency_code)
+            actual_amount = round(rate * float(request_info.get('requestor_amount')), 2)
+        else:
+            actual_amount = float(request_info.get('requestor_amount'))
+        
+        print(f'|| Requested Amount {actual_amount}-{sender_account_currency_code}')
+        print(f'|| Account Balance {sender_account_balance}-{sender_account_currency_code}')
+        if actual_amount > sender_account_balance:
+            input('|| ! You dont have enough money.')
+        else:
+            decision = input('|| Are you sure you want to appect? (1 for accept): ')
+            if decision == '1':
+                self.initiate_transfer(actual_amount,
+                                       sender_account_id,
+                                       request_info.get('requestor_account_id'))
+                self.user.delete_message(request_id)
+                self.send_feedback(request_info.get('requestor_id'), 
+                                   request_id,
+                                   request_info, 
+                                   acceptance_status=True)
+                    
+
+            
+    @login_required
+    def reject_request(self, request_id):
+        request_info = self.extract_request_information(request_id)
+        
+        self.send_feedback(request_info.get('requestor_id'),
+                           request_id,
+                           request_info,
+                           acceptance_status=False
+                           )
+        self.user.delete_message(request_id)
+        
+        
+        
+    @login_required                      
+    def send_feedback(self, receiver_id, request_id, request_info, acceptance_status):
+        send_feedback_table = '''
+        INSERT INTO user_messages (user_id, sender_id, sender_name, message_type, message_context) VALUES (?, ?, ?, ?, ?);
+        '''
+
+        feedback_template = {
+            True: 'Your request worth {amount}-{currency_code} with {request_id} id has been accepted by {sender_name}',
+            False: 'Your request worth {amount}-{currency_code} with {request_id} id has been rejected by {sender_name}'
+        }
+        self.database.cursor.execute(send_feedback_table,
+                                     (receiver_id,
+                                      self.user.user_id,
+                                      self.user.username,
+                                      'feedback',
+                                      feedback_template.get(acceptance_status).format(amount=request_info.get('requestor_amount'),
+                                                                                      currency_code=request_info.get('requestor_currency_code'),
+                                                                                      request_id=request_id,
+                                                                                      sender_name=self.user.username)
+                                                                                      )
+                                       )
+                                       
+        self.database.conn.commit()                      
+                                      
+                                      
 
 class Database:
     '''
@@ -247,11 +375,15 @@ class Database:
         self.cursor = self.conn.cursor()
         self.hasher = PasswordHasher()
         self.db_path = db_path
+        self.message_types = {1: 'message', 2: 'request'}
         self.db_create_tables()
     
     @property
     def banks(self):
-        return self._db_get_banks()
+        bank_dict = {bank[0]: bank[1] 
+                     for bank 
+                     in self._db_get_banks()}
+        return bank_dict
 
     
     def db_create_tables(self):
@@ -307,7 +439,9 @@ class Database:
             message_id INTEGER,
             user_id INTEGER,
             sender_id INTEGER,
+            sender_name TEXT,
             message_type TEXT,
+            message_cd TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             message_context TEXT,
             FOREIGN KEY (user_id) REFERENCES users(user_id)
             PRIMARY KEY("message_id" AUTOINCREMENT)
@@ -316,12 +450,20 @@ class Database:
         create_starter_banks = '''
         INSERT INTO banks (bank_name) VALUES ('Bank1'), ('Bank2'), ('Bank3');
         '''
+        create_user_cache_table = '''
+        CREATE TABLE IF NOT EXISTS user_cache (
+            user_id INTEGER,
+            message_count INTEGER,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        );
+        '''
         try:
             for table in (create_banks_table,
                           create_users_table,
                           create_accounts_table,
                           create_account_transaction_table,
-                          create_user_messagebox_table
+                          create_user_messagebox_table,
+                          create_user_cache_table
                           ):
                 self.cursor.execute(table)
             self.cursor.execute('SELECT * FROM banks;')
@@ -542,15 +684,13 @@ class Bank:
                  ) -> None:
         self.database = database
         self.bank_id = bank_id
+        self.bank_name = self.database.banks.get(self.bank_id, None)
     
     @property
     def users(self):
         return self._get_usernames()
     
-
-
-
-    
+   
     def _get_usernames(self) -> list:
         '''
         Returns all existing usernames in database.
@@ -567,7 +707,21 @@ class Bank:
         except Exception as e:
             print(f'Error occured while get_usernames: {e}')
         return self.database.cursor.fetchall()
-
+    
+    def does_user_exist(self, user_id):
+        check_user_exist_table = '''
+        SELECT * FROM users WHERE user_id = ?;
+        '''
+        
+        self.database.cursor.execute(check_user_exist_table,
+                            (user_id,)
+                            )
+        
+        return self.database.cursor.fetchone() != None
+        
+        
+        
+        
         
     
     
@@ -597,11 +751,15 @@ class User:
         self.email = email
         self.user_cd = user_cd
         self.is_admin = is_admin
-        self.messages = self._load_messages()
+
     
 
     def __repr__(self) -> str:
         return f'{self.bank_id}|{self.user_id} | {self.username}'
+    
+    @property
+    def messages(self):
+        return self._load_messages()
     
     @property
     def accounts(self):
@@ -614,7 +772,7 @@ class User:
         It is used for testing purposes and is not accessible to anyone other than authorized users.
         '''
         
-        for account in self.accounts:
+        for account in self.accounts.values():
             self.database.cursor.execute('''
             UPDATE accounts SET balance = 1000 WHERE user_id = ?
             ''', 
@@ -637,29 +795,17 @@ class User:
                filter(
                lambda x: 
                str(getattr(x, attribute, None)) == str(value), 
-               self.accounts)
+               self.accounts.values())
                )
   
         
-    def _get_account(self, 
-                     account_id: int
-                     ):
-        '''
-        This module allows user to acces the account's datas
-        corresponding to the account_id if the account exists.
-        '''
-        
-        for account in self.accounts:
-            if account.account_id == account_id:
-                return account
-        return None
    
     def _load_accounts(self) -> list:
         '''
         This module prepares the accounts attribute so that the user can access their accounts up to date.
         '''
         
-        accounts = []
+        accounts = {}
         search_accounts = '''
         SELECT * FROM accounts WHERE user_id = ?
         '''
@@ -667,7 +813,7 @@ class User:
         account_records = self.database.cursor.fetchall()
         for account_record in account_records:
             account = Account(self.database, *account_record)
-            accounts.append(account)
+            accounts[account.account_id] = account
 
         return accounts
         
@@ -677,12 +823,19 @@ class User:
         SELECT * FROM user_messages WHERE user_id = ?
         '''
         self.database.cursor.execute(search_messages, (self.user_id,))
-        return self.database.cursor.fetchall()
+        message_dict = {message[0]: message for message in self.database.cursor.fetchall()}
+        return message_dict
         
-            
-        
-        
+    def delete_message(self, message_id):
+        delete_message_table = '''
+        DELETE FROM user_messages WHERE message_id = ?;
+        '''
+        self.database.cursor.execute(delete_message_table,
+                                     (message_id,)
+                                     )
+        self.database.conn.commit()
     
+
 class Account:
     '''
     This class is for accounts that users create specific to their currency (USD by default).
@@ -751,14 +904,6 @@ class Account:
 
         else:
             self._balance = self.database.cursor.fetchone()[0]
-
-
-
-
-
-
-
-
 
 
 class Transaction:

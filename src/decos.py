@@ -21,7 +21,7 @@ def login_required(func):
         if getattr(self, 'user', False):
             return func(self, *args, **kwargs)
         else:
-            raise SessionError('SessionError: You should login for perform this operation (func.__name__). Please login !')
+            raise SessionError(f'SessionError: You should login for perform this operation ({func.__name__}). Please login !')
     return wrapper
 
 
@@ -31,7 +31,7 @@ def logout_required(func):
         if getattr(self, 'user', None) is None:
             return func(self, *args, **kwargs)
         else:
-            raise SessionError('SessionError: You should logout for perform this operation (func.__name__). Please logout !')
+            raise SessionError(f'SessionError: You should logout for perform this operation ({func.__name__}). Please logout !')
     return wrapper
 
 
@@ -43,7 +43,7 @@ def limit_by_second(second):
         @wraps(func)
         def wrapper(*args, **kwargs):
             nonlocal last_time_call, cached_data
-            if ((t := time.time()) - last_time_call) >= second:
+            if ((t := time()) - last_time_call) >= second:
                 last_time_call = t
                 cached_data = func(*args, **kwargs)
             return cached_data

@@ -15,12 +15,12 @@ API_KEY = getenv('API_KEY')
 BASE_URL = 'https://api.freecurrencyapi.com'
 
 
-@limit_by_second(100)
+@limit_by_second(600)
 def get_currencies():
     '''
     This method makes an api request and provides up-to-date financial data.
     '''
-    endpoint = '/v1/currencies?apikey={API_KEY}'
+    endpoint = f'/v1/currencies?apikey={API_KEY}'
     url = BASE_URL + endpoint
     response = get(url).json()['data']
     data = {}

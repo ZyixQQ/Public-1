@@ -304,7 +304,7 @@ class Session:
             actual_amount = round(rate * float(request_info.get('requestor_amount')), 2)
         else:
             actual_amount = float(request_info.get('requestor_amount'))
-        
+        print('||>-----------------<')
         print(f'|| Requested Amount {actual_amount}-{sender_account_currency_code}')
         print(f'|| Account Balance {sender_account_balance}-{sender_account_currency_code}')
         if actual_amount > sender_account_balance:
@@ -315,7 +315,7 @@ class Session:
                 self.initiate_transfer(actual_amount,
                                        sender_account_id,
                                        request_info.get('requestor_account_id'))
-                self.user.delete_message(request_id)
+                self.user.delete_message([request_id])
                 self.send_feedback(request_info.get('requestor_id'), 
                                    request_id,
                                    request_info, 
@@ -332,7 +332,7 @@ class Session:
                            request_info,
                            acceptance_status=False
                            )
-        self.user.delete_message(request_id)
+        self.user.delete_message([request_id])
         
         
         
@@ -799,7 +799,7 @@ class User:
                )
   
         
-   
+    
     def _load_accounts(self) -> list:
         '''
         This module prepares the accounts attribute so that the user can access their accounts up to date.
@@ -826,15 +826,35 @@ class User:
         message_dict = {message[0]: message for message in self.database.cursor.fetchall()}
         return message_dict
         
-    def delete_message(self, message_id):
+    def delete_message(self, message_ids):
         delete_message_table = '''
         DELETE FROM user_messages WHERE message_id = ?;
         '''
-        self.database.cursor.execute(delete_message_table,
-                                     (message_id,)
-                                     )
+        for message_id in message_ids:
+            self.database.cursor.execute(delete_message_table,
+                                        (message_id,)
+                                        )
         self.database.conn.commit()
     
+    def change_account_currency(self, account_id, new_currency_code):   
+        account = self.accounts.get(account_id)
+        current_currency = account.currency_code
+        
+        rate = exchange_rate(current_currency, new_currency_code)
+        
+        new_balance = round(rate * float(account._balance), 2)
+        
+        account._balance = new_balance
+        account.currency_code = new_currency_code
+        
+        change_account_currency_table = '''
+        UPDATE accounts SET currency_code = ?, balance = ? WHERE account_id = ?
+        '''
+        
+        self.database.cursor.execute(change_account_currency_table,
+                                     (new_currency_code, new_balance, account_id)
+                                     )
+        self.database.conn.commit()
 
 class Account:
     '''
@@ -860,7 +880,7 @@ class Account:
 
 
     def __repr__(self) -> str:
-        return f'{self.user_id}|{self.account_id} | {self._balance} {self.currency_code}-{self.account_cd}'
+        return f'{self.user_id} | {self.account_id} | {self._balance} {self.currency_code}-{self.account_cd}'
 
     
     def _load_transactions(self) -> list:

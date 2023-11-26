@@ -113,6 +113,9 @@ class Menu:
 
 def send_message_interface():       
     type_choices = {**session.database.message_types, 0: 'Back to menu'}
+    if len(session.bank.users) == 1:
+        input('|| ! There is no user you can send message')
+        return
     
     def print_users():
         print(f'\\\\{SEP}\n|| Send Message:\n||{SEP}')
@@ -191,22 +194,25 @@ def send_message_interface():
 
 
             
-            
+def print_messages(message=None):
+        print(f'||{SEP}')
+        if not message:
+            for message_id, message in session.user.messages.items():
+                info, user_message = message[-1].split('Message:')
+                print(f'|| Type: {message[4]} |Id: {message_id} |Sender : {message[3]} |Date: {message[-2]}\n|| {info}\n|| Message: {user_message}')
+                print(f'||{SEP}')
+        else:
+            info, user_message = message[-1].split('Message:')
+            print(f'|| Selected Message: ')
+            print(f'|| Type: {message[4]} |Id: {message[0]} |Sender : {message[3]} |Date: {message[-2]}\n|| {info}\n|| Message: {user_message}')
+            print(f'||{SEP}')
             
 
 def view_messages():
     session.payload['message'] = ''
-    def print_messages(message=None):
-        print(f'||{SEP}')
-        if not message:
-            for message_id, message in session.user.messages.items():
-                print(f'|| Type: {message[4]} |Id: {message_id} |Sender : {message[3]}|Date: {message[-2]}\n|| Message: {message[-1]}')
-                print(f'||{SEP}')
-        else:
-            print(f'|| Selected Message: ')
-            print(f'|| Type: {message[4]} |Id: {message[0]} |Sender : {message[3]}|Date: {message[-2]}\n|| Message: {message[-1]}')
-            print(f'||{SEP}')
-    
+    if len(session.user.messages) == 0:
+        input(f'||{SEP}\n|| ! You dont have any messages.')
+        return
     def choose_account():
         print(f'||{SEP}\n|| Your Accounts: ||', end='')
         for account in session.user.accounts.values():
@@ -232,7 +238,7 @@ def view_messages():
         print_messages(message)
         
         if message[4] == 'request':
-            print('|| Accept Request [1]\n|| Reject Request [2]\n|| Delete Message [3]\n|| Cancel Choice [0]')
+            print('|| Accept Request [1]\n|| Reject Request [2]\n|| Delete Message [3]\n|| Cancel Selection [0]')
             choice = input('|| --> ')
             
             if choice == '1':
@@ -243,14 +249,14 @@ def view_messages():
                 session.reject_request(message[0])
                 input(f'|| ! Request {message[0]} succesfully rejected.')
             elif choice == '3':
-                session.user.delete_message(message[0])
+                session.user.delete_message([message[0]])
                 input(f'|| ! Message {message[0]} succesfully deleted.')
         else:
             print('|| Delete Message [1]\n|| Cancel Choice [0]')
             choice = input('|| --> ')
             
             if choice == '1':
-                session.user.delete_message(message[0])
+                session.user.delete_message([message[0]])
                 
        
     while True:
@@ -271,37 +277,112 @@ def view_messages():
         else:
             examine_message(session.user.messages.get(selected_message))
         
-                    
-            
-def create_account():
-    print(f'\\\\{SEP}\n|| Create Account:\n||{SEP}')
-    currencies = list(get_currencies().keys())
+
+def print_currencies(currency_list):
     for i, x in enumerate(currencies):
         if i % 11 == 0 and i != 0:
             print(f'|| {x}')
         else:
             print(f'|| {x}', end='')
+                        
+            
+def create_account():
+    print(f'\\\\{SEP}\n|| Create Account:\n||{SEP}')
+    currencies = list(get_currencies().keys())
+    print_currencies(currencies)
     while True:
         chosen_currency = input('||\n|| Choose a currency_code for your new account --> ').upper()
     
         if chosen_currency in currencies:
             try:
                 session.create_account(chosen_currency)
-                input('|| Account successfully created.')
+                input('|| + Account successfully created.')
                 break
             except ValueError:
-                input('! You have reached the limit number of accounts.')
+                input('|| ! You have reached the limit number of accounts.')
                 break
         else:
             input('|| ! Invalid currency code.')
     
     
-def delete_messages():...  
-def view_accounts():...
+def delete_messages():
+    print_messages()
+    if len(session.user.messages) == 0:
+        input('|| ! You dont have any messages.')
+        return
+    print(f"|| Enter all the message ids you want to delete with a space between them. i.e (1 21 34 483). To go back, just type 0.")
+    while True:
+        valid_ids = []
+        message_ids = input(f'||{SEP}\n|| -> ')
+        if message_ids.strip() == '0':
+            break
+        for message_id in message_ids.split():
+            if message_id.isdigit() and int(message_id) in session.user.messages:
+                valid_ids.append(int(message_id))
+        if valid_ids:
+            print(f'|| {valid_ids}')
+            decision = input(f'|| Are you sure want to delete these messages (1 to accept) --> ')
+            if decision == '1':
+                session.user.delete_message(valid_ids)
+                input('|| + Messages succesfully deleted.')
+                break
+            else:
+                input('|| Deletion is canceled')
+                
+        else:
+            input('|| ! You have not entered a valid id.')
+                
+        
+        
+        
+                
+            
+def print_accounts(account=None):
+    print(f'||{SEP}\n|| Owner ID || Account ID || Balance || Currency Code || Creation Date\n||{SEP}')
+    if not account:
+        for account in session.user.accounts.values():
+            print(f'|| {account}')
+    else:
+        print(account)
+        
+    
+def view_accounts():
+    print_accounts()
+    def account_options(account):
+        print_accounts(account)
+        print('|| Change Currency [1]\n|| Delete Account [2]\n|| Cancel Selection [0]')
+        choice = input('|| --> ')
+        if choice == '1':
+            currencies = list(get_currencies().keys())
+            print_currencies(currencies)
+            chosen_currency = input('|| Choose a currency --> ')
+            if chosen_currency in currencies:
+                session.user.change_account_currency(account.account_id, change_account_currency)
+        elif choice == '2':
+            ...
+        else:
+            return
+        
+    while True: 
+        try:
+            selected_account_id = int(input('|| Enter the account id for select --> '))
+            if selected_account_id not in session.user.accounts:
+                raise IncorrectOptionError('|| ! You dont have an account with this id')
+        except ValueError:
+            input('|| ! Enter valid number')
+        except IncorrectOptionError as error_message:
+            input(error_message)
+        else:
+            account_options(session.user.accounts.get(selected_account_id))
+     
+        
+    
 def delete_account():...
 def make_transfer():...
 def view_transactions():...
 def session_menu():...
+
+
 
 
 
@@ -355,4 +436,6 @@ def bank_choice_interface():
             session.connect_bank(bank_id)
             break
     
+
+
 

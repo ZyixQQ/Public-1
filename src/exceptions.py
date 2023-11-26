@@ -46,7 +46,7 @@ class IncorrectOptionError(Exception):
         self.log(message, error_code)
     
     def log(self, message, error_code):
-        logger = exception_logger()
+        logger = error_logger()
         logger.error(f'{message} | Code: {error_code}')
 
 

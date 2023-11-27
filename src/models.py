@@ -168,27 +168,9 @@ class Session:
             print(f'|| Error occured while extracting _all_user_data: {e}')
         return users
     
-    @login_required
-    def create_account(self, 
-                       currency_code: str = None
-                       ) -> None:
-        '''
-        This method starts the creating new account process.
-        '''
-        if len(self.user.accounts) <= 5:
-            try:
-                self.database.db_create_account(self.user.user_id, 
-                                                currency_code
-                                                )
 
-            except TypeError as e:
-                return False, f'Please Enter a valid currency code ! {e}'
-            except Exception as e:
-                print(f'Error occured in create_new_account: {e}')
-        else:
-            raise ValueError('Reached the account limit')
         
-    @manage_loading(5, '|| Transfer in progress')
+    #@manage_loading(5, '|| Transfer in progress')
     @login_required
     def initiate_transfer(self, 
                           amount: int,
@@ -205,10 +187,10 @@ class Session:
                 sender_account = account
 
         if not sender_account:
-            print("You don't have an account with this id !")
+            input("You don't have an account with this id !")
             return False
         if amount > sender_account._balance:
-            print('You dont have enough money to perform this operation !')
+            input('You dont have enough money to perform this operation !')
             return False
         try:
             response = self.database.db_perform_transfer(amount,
@@ -216,11 +198,11 @@ class Session:
                                                          buyer_account_id,
                                                          )
         except UserNotExistError as e:
-            print(f'UserNotExistError: Occured in perform_transfer: {e}') 
+            input(f'UserNotExistError: Occured in perform_transfer: {e}') 
         except Exception as e:
-            print(f'DatabaseError: {e}')
+            input(f'DatabaseError: {e}')
             raise e
-                
+     
         sender_account.update_account()
         return True 
         
@@ -312,6 +294,7 @@ class Session:
         else:
             decision = input('|| Are you sure you want to appect? (1 for accept): ')
             if decision == '1':
+                message = input('|| Enter an acceptance message -> ')
                 self.initiate_transfer(actual_amount,
                                        sender_account_id,
                                        request_info.get('requestor_account_id'))
@@ -319,17 +302,20 @@ class Session:
                 self.send_feedback(request_info.get('requestor_id'), 
                                    request_id,
                                    request_info, 
-                                   acceptance_status=True)
+                                   message,
+                                   acceptance_status=True
+                                   )
                     
 
             
     @login_required
     def reject_request(self, request_id):
         request_info = self.extract_request_information(request_id)
-        
+        message = input('|| Enter a rejection message -> ')
         self.send_feedback(request_info.get('requestor_id'),
                            request_id,
                            request_info,
+                           message,
                            acceptance_status=False
                            )
         self.user.delete_message([request_id])
@@ -337,14 +323,14 @@ class Session:
         
         
     @login_required                      
-    def send_feedback(self, receiver_id, request_id, request_info, acceptance_status):
+    def send_feedback(self, receiver_id, request_id, request_info, message, acceptance_status):
         send_feedback_table = '''
         INSERT INTO user_messages (user_id, sender_id, sender_name, message_type, message_context) VALUES (?, ?, ?, ?, ?);
         '''
 
         feedback_template = {
-            True: 'Your request worth {amount}-{currency_code} with {request_id} id has been accepted by {sender_name}',
-            False: 'Your request worth {amount}-{currency_code} with {request_id} id has been rejected by {sender_name}'
+            True: 'Your request worth {amount}-{currency_code} with {request_id} id has been accepted by {sender_name}. Message: {message}',
+            False: 'Your request worth {amount}-{currency_code} with {request_id} id has been rejected by {sender_name}. Message: {message} '
         }
         self.database.cursor.execute(send_feedback_table,
                                      (receiver_id,
@@ -354,8 +340,10 @@ class Session:
                                       feedback_template.get(acceptance_status).format(amount=request_info.get('requestor_amount'),
                                                                                       currency_code=request_info.get('requestor_currency_code'),
                                                                                       request_id=request_id,
-                                                                                      sender_name=self.user.username)
+                                                                                      sender_name=self.user.username,
+                                                                                      message=message
                                                                                       )
+                                        )
                                        )
                                        
         self.database.conn.commit()                      
@@ -375,7 +363,7 @@ class Database:
         self.cursor = self.conn.cursor()
         self.hasher = PasswordHasher()
         self.db_path = db_path
-        self.message_types = {1: 'message', 2: 'request'}
+        self.message_types = {'1': 'message', '2': 'request'}
         self.db_create_tables()
     
     @property
@@ -522,20 +510,20 @@ class Database:
         This method creates a new account for the user corresponding to the user_id parameter.
         '''
         
-        if not currency_code:
-            currency_code = 'USD'
-
-
         create_account_table = '''
         INSERT INTO accounts (user_id, currency_code) VALUES (?, ?);
         '''
+
+        if not currency_code:
+            currency_code = 'USD'
+            
+        self.cursor.execute(create_account_table,
+                            (user_id, currency_code)
+                            )
         
-        self.cursor.execute(create_account_table, 
-                            (user_id, 
-                             currency_code.upper()
-                             )
-                            )            
         self.conn.commit()
+        
+        
     
 
 
@@ -605,9 +593,12 @@ class Database:
                             )
         buyer_account_currency = self.cursor.fetchone()
 
-        rate = exchange_rate(sender_account_currency[0],
-                             buyer_account_currency[0]
-                             )
+        if buyer_account_currency != sender_account_currency:
+            rate = exchange_rate(sender_account_currency[0],
+                                buyer_account_currency[0]
+                                )
+        else:
+            rate = 1
         return round(amount, 2), round(float(amount) * rate, 2)
 
 
@@ -652,6 +643,7 @@ class Database:
         update_buyer_transactions = '''
         INSERT INTO account_transactions (account_id, amount, transaction_type) VALUES (?, ?, ?)
         '''
+
         deducted_amount, sent_amount = self.db_convert_by_account_currency(amount, sender_account_id,
                                                                            buyer_account_id
                                                                            )
@@ -697,7 +689,7 @@ class Bank:
         '''
         
         get_usernames_table = '''
-        SELECT username, user_id FROM users WHERE bank_id = ?
+        SELECT user_id, username FROM users WHERE bank_id = ?
         '''
 
         try:
@@ -751,6 +743,7 @@ class User:
         self.email = email
         self.user_cd = user_cd
         self.is_admin = is_admin
+        self.accounts = self._load_accounts()    
 
     
 
@@ -761,9 +754,7 @@ class User:
     def messages(self):
         return self._load_messages()
     
-    @property
-    def accounts(self):
-        return self._load_accounts()
+
 
     @admin_required
     def _prepare(self) -> None:
@@ -855,6 +846,86 @@ class User:
                                      (new_currency_code, new_balance, account_id)
                                      )
         self.database.conn.commit()
+    
+    def create_account(self, 
+                       currency_code: str = None
+                       ) -> None:
+        '''
+        This method starts the creating new account process.
+        '''
+        
+        get_account_information_table = '''
+        SELECT * FROM accounts WHERE user_id = ? ORDER BY ROWID DESC LIMIT 1;
+        '''
+
+        if len(self.accounts) == 5:
+            raise ValueError('Reached the account limit')
+        try:
+            self.database.db_create_account(self.user_id, 
+                                            currency_code
+                                            )
+        except Exception as e:
+            print(f'Error occured in create_new_account: {e}')
+        else:
+            self.database.cursor.execute(get_account_information_table,
+                                         (self.user_id,)
+                                         )
+            account_info = self.database.cursor.fetchone()
+            new_account = Account(self.database, *account_info)
+            self.accounts[new_account.account_id] = new_account
+
+            
+    def delete_account(self, account_id, destination_account_id=None):
+        if len(self.accounts) == 1:
+            return False, 'You cant delete all your accounts.'
+           
+        delete_account_table = '''
+        DELETE FROM accounts WHERE account_id = ?;
+        '''
+        
+        transfer_money_table = '''
+        UPDATE accounts SET balance = ? WHERE account_id = ?;
+        '''
+        
+        to_be_deleted_account = self.accounts.get(account_id)
+        destination_account = self.accounts.get(destination_account_id)
+        
+        if not destination_account_id:
+            self.database.cursor.execute(delete_account_table, 
+                                (account_id,)
+                                )
+            self.database.conn.commit()
+            del self.accounts[account_id]
+            return
+        elif to_be_deleted_account.currency_code == destination_account.currency_code:
+            self.database.cursor.execute(transfer_money_table,
+                                         (to_be_deleted_account._balance,
+                                          account_id
+                                          )
+                                         )
+            actual_amount = to_be_deleted_account._balance
+        else:
+            rate = exchange_rate(to_be_deleted_account.currency_code, 
+                                 destination_account.currency_code)
+            actual_amount = round(rate * float(to_be_deleted_account._balance))
+            
+            self.database.cursor.execute(transfer_money_table,
+                                         (actual_amount,
+                                          destination_account_id
+                                          )
+                                         )
+        self.database.cursor.execute(delete_account_table,
+                                     (account_id,)
+                                     )
+        self.database.conn.commit()
+        del self.accounts[account_id]
+        destination_account._balance += actual_amount
+        return True
+                
+                                          
+            
+        
+        
 
 class Account:
     '''
@@ -880,7 +951,7 @@ class Account:
 
 
     def __repr__(self) -> str:
-        return f'{self.user_id} | {self.account_id} | {self._balance} {self.currency_code}-{self.account_cd}'
+        return f'{self.user_id} | {self.account_id} | {self._balance} | {self.currency_code} | {self.account_cd}'
 
     
     def _load_transactions(self) -> list:

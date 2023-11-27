@@ -14,6 +14,12 @@ API_KEY = getenv('API_KEY')
 
 BASE_URL = 'https://api.freecurrencyapi.com'
 
+CURRENCY_CODES = [
+    "EUR", "USD", "JPY", "BGN", "CZK", "DKK", "GBP", "HUF", "PLN", "RON", "SEK", "CHF",
+    "ISK", "NOK", "HRK", "RUB", "TRY", "AUD", "BRL", "CAD", "CNY", "HKD", "IDR",
+    "ILS", "INR", "KRW", "MXN", "MYR", "NZD", "PHP", "SGD", "THB", "ZAR"
+]
+
 
 @limit_by_second(600)
 def get_currencies():

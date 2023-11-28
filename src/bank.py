@@ -9,7 +9,7 @@ t_width, t_height = os.get_terminal_size()
 session = Session()
 
 
-SEP = '>-----------------<'
+SEP = '>-----------------<'*3
  
 
 class Menu:
@@ -66,7 +66,7 @@ class Menu:
         
         if session.user is not None:    
             user_info = '// ~ {id} >< {name} >< {email} > {notification}'
-            notification = session.payload['message']
+            notification = session.payload['message'] + session.payload['transfer']
             header_string = user_info.format(id=session.user.user_id, name=session.user.username, email=session.user.email, notification=notification)
             print(title, header_string, sep='\n')
         else:
@@ -87,7 +87,7 @@ class Menu:
         message_menu = Menu('MESSAGES',
                             ('1', 'Send Message', send_message_interface),
                             ('2', 'View Messages', view_messages),
-                            ('3', 'Delete Message', delete_messages),
+                            ('3', 'Delete Message', delete_messages_interface),
                             ('0', 'Back to prev menu', Menu.menu_closer)
                             )
         transfer_menu = Menu('TRANSFERS',
@@ -116,16 +116,30 @@ class Menu:
                            )
 
 def session_menu():...
+
+def print_accounts(account=None, clear_terminal=False):
+    if clear_terminal:
+        Menu.header('ACCOUNTS')
+    if not account:
+        print(f'||{SEP}\n|| Owner ID || Account ID || Balance || Currency Code || Creation Date\n||{SEP}')
+        for account in session.user.accounts.values():
+            print(f'|| {account}')
+    else:
+        print(f'||{SEP}\n|| Owner ID || Account ID || Balance || Currency Code || Creation Date\n||{SEP}')
+        print(f'|| {account}')
+
+
+
 def get_certain_input(message, valid_options, loop=False, warning_message=None):
     if not loop:
-        user_input = input(message).upper()
+        user_input = input(f'||{SEP}\n{message}').upper()
         if user_input not in valid_options:
             return None
         else:
             return user_input
     else:
         while True:
-            user_input = input(message).upper()
+            user_input = input(f'||{SEP}\n{message}').upper()
             if user_input not in valid_options:
                 print(warning_message) if warning_message else input('|| Invalid option.')
             else:
@@ -146,12 +160,6 @@ def send_message_interface():
         print(*[f'|| {message_num}: {message_type}'
               for message_num, message_type
               in type_choices.items()])
-   
-    def print_users_accounts():
-        print(f'||{SEP}\n|| Your accounts:')
-        for account in session.user.accounts.values():
-            print(f'|| {account}', end='')
-    
     
     print_users()
     receiver_id = get_certain_input(message='|| Enter the user id you want to send message (0 to go back)-> ',
@@ -181,20 +189,20 @@ def send_message_interface():
         input('|| + Message sent successfully.')
     
     elif type_choice == '2':
-        print_users_accounts()
-        account_id = get_certain_input(message='\n|| Select an account id for your request -> ',
+        print_accounts()
+        account_id = get_certain_input(message='|| Select an account id for your request -> ',
                                        valid_options=[str(account_id) for account_id in session.user.accounts.keys()]
                                        )
         if not account_id:
             input('|| ! Invalid account id. Please make sure you enter a valid account id.')
             return
         try:
-            amount = int(input('|| Enter the amount: '))         
+            amount = int(input('|| Enter the amount -> '))         
         except ValueError:
             input('|| ! Invalid amount. Please enter a valid amount.')
             return
         else:
-            message = input('||\n|| Enter the message --> ')
+            message = input('|| Enter the message --> ')
             session.send_message('request',
                                  {'amount': amount,
                                   'account_id': int(account_id),
@@ -203,11 +211,12 @@ def send_message_interface():
                                   },
                                  receiver_id
                                  )
-            input('|| + Message sent successfully.')
+            input('|| + Request sent successfully.')
 
 
 
 
+        
 
             
 def print_messages(message=None):
@@ -241,8 +250,6 @@ def view_messages():
             input('|| Invalid account id')
             return None
         else:
-            print(account_id)
-            input()
             return account_id
 
     def examine_message(message):
@@ -260,14 +267,14 @@ def view_messages():
                 session.reject_request(message[0])
                 input(f'|| ! Request {message[0]} succesfully rejected.')
             elif choice == '3':
-                session.user.delete_message([message[0]])
+                session.user.delete_messages([message[0]])
                 input(f'|| ! Message {message[0]} succesfully deleted.')
         else:
-            print('|| Delete Message [1]\n|| Cancel Choice [0]')
+            print('|| Delete Message [1]\n|| Cancel Choice  [0]')
             choice = input('|| --> ')
             
             if choice == '1':
-                session.user.delete_message([message[0]])
+                session.user.delete_messages([message[0]])
                 
        
     while True:
@@ -311,26 +318,35 @@ def create_account():
         input('|| + Account succesfully created')
 
     
-def delete_messages():
+def delete_messages_interface():
     print_messages()
     if len(session.user.messages) == 0:
         input('|| ! You dont have any messages.')
         return
-    print(f"|| Enter all the message ids you want to delete with a space between them. i.e (1 21 34 483). To go back, just type 0.")
+    print(f"""|| Enter all the message ids you want to delete with a space between them. i.e (1 21 34 483). To go back, just type 0.
+|| You can also delete with categories (e.g. 'message' or 'request' or 'feedback').""")
     
     while True:
         valid_ids = []
-        message_ids = input(f'||{SEP}\n|| -> ')
-        if message_ids.strip() == '0':
+        deletion = input(f'||{SEP}\n|| -> ')
+        if deletion.strip() == '0':
             break
-        for message_id in message_ids.split():
+        if deletion in ('message', 'request', 'feedback', 'transfer'):
+            message_ids = [message_id for message_id, message in session.user.messages.items() if message[4] == deletion]
+            if message_ids:
+                session.user.delete_messages(message_ids)
+                input('|| + Messages succesfully deleted.')
+            else:
+                input('|| ! There is no message with this type.')
+            break
+        for message_id in deletion.split():
             if message_id.isdigit() and int(message_id) in session.user.messages:
                 valid_ids.append(int(message_id))
         if valid_ids:
             print(f'|| {valid_ids}')
             decision = input(f'|| Are you sure want to delete these messages (1 to accept) --> ')
             if decision == '1':
-                session.user.delete_message(valid_ids)
+                session.user.delete_messages(valid_ids)
                 input('|| + Messages succesfully deleted.')
                 break
             else:
@@ -344,27 +360,19 @@ def delete_messages():
         
                 
             
-def print_accounts(account=None):
-    if not account:
-        Menu.header('ACCOUNTS')
-        print(f'||{SEP}\n|| Owner ID || Account ID || Balance || Currency Code || Creation Date\n||{SEP}')
-        for account in session.user.accounts.values():
-            print(f'|| {account}')
-    else:
-        print(f'||{SEP}\n|| Owner ID || Account ID || Balance || Currency Code || Creation Date\n||{SEP}')
-        print(f'|| {account}')
-        
+
     
 def view_accounts():
     def account_options(account):
         print_accounts(account)
-        print('|| Change Currency [1]\n|| Delete Account [2]\n|| Cancel Selection [0]')
+        print(f'||{SEP}\n|| Change Currency  [1]\n|| Delete Account   [2]\n|| Cancel Selection [0]')
         choice = input('|| --> ')
         if choice == '1':
             print_currencies()
-            chosen_currency = input('|| Choose a currency --> ').upper()
+            chosen_currency = input(f'||{SEP}\n|| Choose a currency --> ').upper()
             if chosen_currency in CURRENCY_CODES:
                 session.user.change_account_currency(account.account_id, chosen_currency)
+                input('|| + Currency Code succesfully changed.')
             else:
                 input('|| ! Invalid currency')
             
@@ -387,8 +395,8 @@ def view_accounts():
             return
         
     while True: 
-        print_accounts()
-        selected_account_id = input('|| Enter the account id for select (0 for go back) -> ')
+        print_accounts(clear_terminal=True)
+        selected_account_id = input(f'||{SEP}\n|| Enter the account id for select (0 for go back) -> ')
                                                 
         if selected_account_id == '0':
             break
@@ -400,18 +408,14 @@ def view_accounts():
         
     
 def make_transfer():
-    def print_transactions(account, transaction=None):
-        if not transaction:
-            print(f'||{SEP}\n|| ID || Amount || Type || Date \n||{SEP}')
-            for transaction in account.transactions:
-                print(f'|| {transaction}')
     def choose_receiver_id(account_id):
-        receiver_id = input('|| Enter a receiver id -> ')
+        receiver_id = input('|| Enter a receiver account id -> ')
         if receiver_id.isdigit() and \
-                session.bank.does_user_exist(int(receiver_id)) and \
+                session.bank.does_account_exist(int(receiver_id)) and \
                 receiver_id != account_id:
             return int(receiver_id)
-        input('|| ! Please enter a valid user id')
+        else:
+            input('|| ! Please enter a valid user id')
         
     while True:
         Menu.header('TRANSFER')
@@ -419,32 +423,58 @@ def make_transfer():
         account_id = get_certain_input(message='|| Enter the account ID  (0 to go back) -> ',
                                        valid_options=[str(account_id) for account_id in session.user.accounts.keys()] + ['0']
                                        )
-        if account_id == '0':
+        if not account_id:
+            input('|| ! Invalid account id.')
+        elif account_id == '0':
             break
         elif account_id.isdigit() and int(account_id) in session.user.accounts:
-            receiver_id = choose_receiver_id(account_id)
-            
-            try:
-                amount = int(input('|| Enter the amount -> '))
-                if amount > session.user.accounts.get(int(account_id))._balance:
-                    raise ValueError()
-            except ValueError:
-                input('|| ! Please enter a valid and positive amount with sufficient funds.')
+            sender_account_id = session.user.accounts.get(int(account_id))
+            if sender_account_id._balance < 1:
+                input('|| ! Not enough funds in this account.')
             else:
-                session.initiate_transfer(amount, int(account_id), receiver_id)
-                input('|| + Succesfully transfered')
+                receiver_id = choose_receiver_id(account_id)
+                
+                if receiver_id:
+                    try:
+                        amount = int(input('|| Enter the amount -> '))
+                        if amount > session.user.accounts.get(int(account_id))._balance:
+                            raise ValueError()
+                    except ValueError:
+                        input('|| ! Please enter a valid and positive amount with sufficient funds.')
+                    else:
+                        if receiver_id not in session.user.accounts:
+                            session.initiate_transfer(amount, int(account_id), receiver_id, send_feedback=True)
+                        else:
+                            session.initiate_transfer(amount, int(account_id), receiver_id)
+                        input('|| + Succesfully transfered')
         else:
             input('|| ! Invalid account id.')
                 
         
     
 
-def view_transactions():...
-
-
-
-
-
+def view_transactions():
+    def print_transactions(account):
+        Menu.header('TRANSACTIONS')
+        print(f'||{SEP}')
+        for transaction in account.transactions.values():
+            print(transaction)
+    
+    while True:
+        print_accounts(clear_terminal=True)
+        
+        account_id = get_certain_input(message='|| Choose an account id (0 to go back) -> ',
+                                    valid_options=[str(account_id) for account_id in session.user.accounts.keys()] + ['0']
+                                    )
+        if not account_id:
+            input('|| ! Invalid account id')
+        elif account_id == '0':
+            break
+        else:
+            account = session.user.accounts.get(int(account_id))
+            print_transactions(account)
+            input('|| Press enter to go back')
+            
 
 def login_interface():
     print(f'\\\\{SEP}\n|| Login :')

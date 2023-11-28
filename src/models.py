@@ -32,7 +32,7 @@ class Session:
 
         
     
-    @manage_loading(5, '|| Verifying User')
+    # @manage_loading(5, '|| Verifying User')
     @logout_required
     def login(self, 
               username: str, 
@@ -67,11 +67,13 @@ class Session:
         check_users_cache = '''
         SELECT * FROM user_cache WHERE user_id = ?
         '''
+        
+
         create_user_cache_table = '''
-        INSERT INTO user_cache (user_id, message_count) VALUES (?, ?);
+        INSERT INTO user_cache (user_id, message_count, last_transfer_id) VALUES (?, ?, ?);
         '''
         update_user_cache_table = '''
-        UPDATE user_cache SET message_count = ? WHERE user_id = ?;
+        UPDATE user_cache SET message_count = ? AND last_transfer_id = ? WHERE user_id = ?;
         '''
         
         self.database.cursor.execute(check_users_cache,
@@ -79,10 +81,10 @@ class Session:
                                      )
         if self.database.cursor.fetchone() is None:
             self.database.cursor.execute(create_user_cache_table,
-                                         (self.user.user_id, len(self.user.messages)))
+                                         (self.user.user_id, len(self.user.messages), max(self.user.messages)))
         else:
             self.database.cursor.execute(update_user_cache_table,
-                                (len(self.user.messages), self.user.user_id))
+                                (len(self.user.messages), self.user.user_id, max(self.user.messages)))
                                 
         self.database.conn.commit()
         self.user = None
@@ -90,6 +92,14 @@ class Session:
     def check_user_cache(self):
         check_users_cache = '''
         SELECT message_count FROM user_cache WHERE user_id = ?
+        '''
+        
+        get_last_transfer_table = '''
+        SELECT * FROM user_messages WHERE user_id = ? AND message_id > ? AND message_type = ? ORDER BY message_id DESC;
+        '''
+        
+        get_trasnfer_id_cache = '''
+        SELECT last_transfer_id FROM user_cache WHERE user_id = ?;
         '''
         self.database.cursor.execute(check_users_cache,
                             (self.user.user_id,)
@@ -101,6 +111,28 @@ class Session:
             self.payload['message'] = f'You have {len(self.user.messages) - message_count[0]} new message.'
         else:
             self.payload['message'] = ''
+'''        
+        self.database.cursor.execute(get_trasnfer_id_cache,
+                                     (self.user.user_id,)
+                                     )
+        last_transfer_id = self.database.cursor.fetchone()
+        
+        if not last_transfer_id:
+            self.payload['transfer'] = ''
+        elif last_transfer_id[0]:
+            self.database.cursor.execute(get_last_transfer_table,
+                                        (self.user.user_id, last_transfer_id, 'transfer')
+                                        )
+            last_transfers = self.database.cursor.fetchall()
+            if last_transfers:
+                # There are new messages 
+                self.payload['transfer'] = f'< You have {len(last_transfers)} new transfers.'
+            else:
+                self.payload['transfer'] = ''
+'''        
+            
+        
+        
             
         
     
@@ -155,7 +187,7 @@ class Session:
         
         users = []
         search_users = '''
-        SELECT * FROM users WHERE bank_id = ?
+        SELECT * FROM users WHERE bank_id = ?;
         '''
         try:
             self.database.cursor.execute(search_users, (self.bank_id,))
@@ -175,16 +207,18 @@ class Session:
     def initiate_transfer(self, 
                           amount: int,
                           sender_account_id: int, 
-                          buyer_account_id: int
+                          buyer_account_id: int,
+                          send_feedback=False,
                           ) -> bool:
         '''
         This method starts the transfer process.
         '''
-        sender_account = None
+        get_buyer_id_table = '''
+        SELECT user_id FROM accounts WHERE account_id = ?;
+        '''
+        
+        sender_account = self.user.accounts.get(sender_account_id, None)
 
-        for account in self.user.accounts.values():
-            if account.account_id == sender_account_id:
-                sender_account = account
 
         if not sender_account:
             input("You don't have an account with this id !")
@@ -199,11 +233,29 @@ class Session:
                                                          )
         except UserNotExistError as e:
             input(f'UserNotExistError: Occured in perform_transfer: {e}') 
+            return
         except Exception as e:
             input(f'DatabaseError: {e}')
             raise e
      
-        sender_account.update_account()
+                
+        if send_feedback:
+            message = input('|| Enter the transfer message -> ')
+            self.database.cursor.execute(get_buyer_id_table,
+                                         (buyer_account_id,)
+                                         )
+            buyer_id = self.database.cursor.fetchone()[0]
+            self.send_message('transfer',
+                              dict(amount=amount,
+                               currency_code=self.user.accounts.get(sender_account_id).currency_code,
+                               account_id=buyer_account_id,
+                               message=message
+                               ),
+                               buyer_id
+                              )
+        sender_account.update_account()     
+        if buyer_account_id in self.user.accounts:
+            self.user.accounts.get(buyer_account_id).update_account()
         return True 
         
     @admin_required
@@ -233,7 +285,8 @@ class Session:
                      ):
         templates = {
             'request': 'User with id <{id}>, named <{name}>, is requesting <{amount}-{currency_code}> for their account with id <{account_id}> from you. Message: {message}',
-            'message' : 'User with id <{id}> named {name} has a message for you. Message: {message}'  
+            'message' : 'User with id <{id}> named <{name}> has a message for you. Message: {message}',
+            'transfer': 'User with id <{id}> named <{name}> transferred <{amount}-{currency_code}> to your account with id <{account_id}>. Message: {message}'
         }
         
         send_message_table = '''
@@ -441,7 +494,8 @@ class Database:
         create_user_cache_table = '''
         CREATE TABLE IF NOT EXISTS user_cache (
             user_id INTEGER,
-            message_count INTEGER,
+            message_count INTEGER DEFAULT 0,
+            last_transfer_id INTEGER DEFAULT 0,
             FOREIGN KEY (user_id) REFERENCES users(id)
         );
         '''
@@ -615,7 +669,7 @@ class Database:
         '''
         
         check_if_buyer_exists_table = '''
-        SELECT * FROM accounts WHERE account_id = ?
+        SELECT user_id FROM accounts WHERE account_id = ?
         '''
             
         self.cursor.execute(check_if_buyer_exists_table,
@@ -711,7 +765,15 @@ class Bank:
         
         return self.database.cursor.fetchone() != None
         
+    def does_account_exist(self, account_id):
+        check_account_exist_table = '''
+        SELECT * FROM accounts WHERE account_id = ?;
+        '''
         
+        self.database.cursor.execute(check_account_exist_table,
+                                     (account_id,)
+                                     )
+        return self.database.cursor.fetchone() != None
         
         
         
@@ -743,18 +805,14 @@ class User:
         self.email = email
         self.user_cd = user_cd
         self.is_admin = is_admin
-        self.accounts = self._load_accounts()    
+        self.accounts = self._load_accounts() 
+        self.messages = self._load_messages()
 
     
 
     def __repr__(self) -> str:
-        return f'{self.bank_id}|{self.user_id} | {self.username}'
+        return f'{self.bank_id:<4} || {self.user_id:<8} || {self.username}'
     
-    @property
-    def messages(self):
-        return self._load_messages()
-    
-
 
     @admin_required
     def _prepare(self) -> None:
@@ -817,7 +875,7 @@ class User:
         message_dict = {message[0]: message for message in self.database.cursor.fetchall()}
         return message_dict
         
-    def delete_message(self, message_ids):
+    def delete_messages(self, message_ids):
         delete_message_table = '''
         DELETE FROM user_messages WHERE message_id = ?;
         '''
@@ -825,8 +883,11 @@ class User:
             self.database.cursor.execute(delete_message_table,
                                         (message_id,)
                                         )
+            del self.messages[message_id]
         self.database.conn.commit()
-    
+        
+
+
     def change_account_currency(self, account_id, new_currency_code):   
         account = self.accounts.get(account_id)
         current_currency = account.currency_code
@@ -923,7 +984,16 @@ class User:
         return True
                 
                                           
+    def get_all_actions(self):
+        get_all_user_actions_table = '''
+        SELECT * from account_transactions where account_id in (SELECT user_id from accounts where user_id = ?);
+        '''
+        self.database.cursor.execute(get_all_user_actions_table,
+                                     (self.user_id,)
+                                     )
             
+            
+        
         
         
 
@@ -951,7 +1021,7 @@ class Account:
 
 
     def __repr__(self) -> str:
-        return f'{self.user_id} | {self.account_id} | {self._balance} | {self.currency_code} | {self.account_cd}'
+        return f'{self.user_id:^8} || {self.account_id:^10} || {self._balance:^8} || {self.currency_code:^12} || {self.account_cd}'
 
     
     def _load_transactions(self) -> list:
@@ -959,7 +1029,7 @@ class Account:
         This module prepares the transactions attribute so that the accounts can access their transactions up to date.
         '''
         
-        transactions = []
+        transactions_dict = {}
 
         search_transactions = '''
         SELECT * FROM account_transactions WHERE account_id = ?
@@ -970,10 +1040,10 @@ class Account:
             transaction_records = self.database.cursor.fetchall()
             for transaction_record in transaction_records:
                 transaction = Transaction(*transaction_record)
-                transactions.append(transaction)
+                transactions_dict[transaction.transaction_id] = transaction
         except Exception as e:
             print(f'Error occured while _load_transactions: {e}')
-        return transactions
+        return transactions_dict
     
     def update_account(self) -> None:
         '''
@@ -1017,6 +1087,5 @@ class Transaction:
         self.transaction_date = transaction_date
 
     def __repr__(self):
-        return f'{self.transaction_id} | {self.transaction_type}: {self.amount} {self.transaction_date}'
-        
+        return f'|| ID: {self.transaction_id:<4} |Type: {self.transaction_type:<12} |Amount: {self.amount:<6} |Date: {self.transaction_date}'
         

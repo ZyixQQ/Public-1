@@ -6,13 +6,15 @@ from getpass import getpass
 from exceptions import IncorrectOptionError
 from currency import get_currencies, CURRENCY_CODES
 t_width, t_height = os.get_terminal_size()
+
+
 session = Session()
-
-
 SEP = '>-----------------<'*3
  
 
 class Menu:
+    
+    
     def __init__(self, name, *options):
         self.name = name
         self.options = options
@@ -66,7 +68,7 @@ class Menu:
         
         if session.user is not None:    
             user_info = '// ~ {id} >< {name} >< {email} > {notification}'
-            notification = session.payload['message'] + session.payload['transfer']
+            notification = session.payload['message']
             header_string = user_info.format(id=session.user.user_id, name=session.user.username, email=session.user.email, notification=notification)
             print(title, header_string, sep='\n')
         else:
@@ -91,13 +93,13 @@ class Menu:
                             ('0', 'Back to prev menu', Menu.menu_closer)
                             )
         transfer_menu = Menu('TRANSFERS',
-                             ('1', 'Make Transfer', make_transfer),
-                             ('2', 'View Transactions', view_transactions),
+                             ('1', 'Make Transfer', make_transfer_interface),
+                             ('2', 'View Transactions', view_transactions_interface),
                              ('0', 'Back to prev menu', Menu.menu_closer)
                              )
         account_menu = Menu('ACCOUNTS',
-                            ('1', 'Create Account', create_account),
-                            ('2', 'View Accounts', view_accounts),
+                            ('1', 'Create Account', create_account_interface),
+                            ('2', 'View Accounts', view_accounts_interface),
                             ('0', 'Back to prev menu', Menu.menu_closer)
                             )
         main_menu = Menu('OFFLINE',
@@ -107,29 +109,82 @@ class Menu:
                          ('4', 'Switch Banks', bank_choice_interface),
                          ('0', 'Exit', Menu.menu_closer)
                          )
+        profile_menu = Menu('PROFILE',
+                           ('1', 'View Profile', view_profile_interface),
+                           ('2', 'Delete Account', delete_account_interface),
+                           ('0', 'Back to prev menu', Menu.menu_closer)
+                           )
         online_menu = Menu('ONLINE',
-                           ('1', 'Account Operations', account_menu),
-                           ('2', 'Transfer Operations', transfer_menu),
-                           ('3', 'Session Operations', session_menu),
+                           ('1', 'Profile Operations', profile_menu),
+                           ('2', 'Account Operations', account_menu),
+                           ('3', 'Transfer Operations', transfer_menu),
                            ('4', 'Message Operations', message_menu),
                            ('0', 'Log out', Menu.menu_closer)
                            )
 
-def session_menu():...
+def view_profile_interface():
+    Printer.print_profile()
+def delete_account_interface():...
+class Printer:
+    @classmethod
+    def print_currencies(cls):
+        for i, x in enumerate(CURRENCY_CODES):
+            if i % 11 == 0 and i != 0:
+                print(f'|| {x}')
+            else:
+                print(f'|| {x}', end='')
+        print()
+    
+    @classmethod
+    def print_banks(cls):
+        print(rf'\\{SEP}')
+        for bank_id, bank_name in session.database.banks.items():
+            print(f'|| {bank_name} >< Id: {bank_id}')
 
-def print_accounts(account=None, clear_terminal=False):
-    if clear_terminal:
-        Menu.header('ACCOUNTS')
-    if not account:
-        print(f'||{SEP}\n|| Owner ID || Account ID || Balance || Currency Code || Creation Date\n||{SEP}')
-        for account in session.user.accounts.values():
+        
+    @classmethod
+    def print_accounts(cls, account=None, clear_terminal=False):
+        if clear_terminal:
+            Menu.header('ACCOUNTS')
+        if not account:
+            print(f'||{SEP}\n|| Owner ID || Account ID || Balance || Currency Code || Creation Date\n||{SEP}')
+            for account in session.user.accounts.values():
+                print(f'|| {account}')
+        else:
+            print(f'||{SEP}\n|| Owner ID || Account ID || Balance || Currency Code || Creation Date\n||{SEP}')
             print(f'|| {account}')
-    else:
-        print(f'||{SEP}\n|| Owner ID || Account ID || Balance || Currency Code || Creation Date\n||{SEP}')
-        print(f'|| {account}')
+    
+    @classmethod
+    def print_messages(cls, message=None):
+        print(f'||{SEP}')
+        if not message:
+            for message_id, message in session.user.messages.items():
+                info, user_message = message[-1].split('Message:')
+                print(f'|| Type: {message[4]} |Id: {message_id} |Sender : {message[3]} |Date: {message[-2]}\n|| {info}\n|| Message: {user_message}')
+                print(f'||{SEP}')
+        else:
+            info, user_message = message[-1].split('Message:')
+            print(f'|| Selected Message: ')
+            print(f'|| Type: {message[4]} |Id: {message[0]} |Sender : {message[3]} |Date: {message[-2]}\n|| {info}\n|| Message: {user_message}')
+            print(f'||{SEP}')
 
-
-
+    @classmethod
+    def print_profile(cls):
+        print(f'||{SEP}')
+        for key, value in zip(['Bank ID', 
+                               'Bank Name', 
+                               'User ID', 
+                               'Username', 
+                               'Date joined'
+                               ], 
+                              [session.bank.bank_id, 
+                               session.bank.bank_name, 
+                               session.user.user_id, 
+                               session.user.username, 
+                               session.user.user_cd
+                               ]):
+            print(f'|| {key:<12}: {value}')
+            
 def get_certain_input(message, valid_options, loop=False, warning_message=None):
     if not loop:
         user_input = input(f'||{SEP}\n{message}').upper()
@@ -148,7 +203,7 @@ def get_certain_input(message, valid_options, loop=False, warning_message=None):
 def send_message_interface():       
     type_choices = {**session.database.message_types, 0: 'Back to menu'}
     if len(session.bank.users) == 1:
-        input('|| ! There is no user you can send message')
+        input(f'||{SEP}\n|| ! There is no user you can send message')
         return
     
     def print_users():
@@ -181,7 +236,7 @@ def send_message_interface():
         return
     
     if type_choice == '1':
-        message = input(f'||\n|| Enter your message -> ')
+        message = input(f'||{SEP}\n|| Enter your message -> ')
         session.send_message('message',
                              {'message': message},
                              receiver_id
@@ -189,7 +244,7 @@ def send_message_interface():
         input('|| + Message sent successfully.')
     
     elif type_choice == '2':
-        print_accounts()
+        Printer.print_accounts()
         account_id = get_certain_input(message='|| Select an account id for your request -> ',
                                        valid_options=[str(account_id) for account_id in session.user.accounts.keys()]
                                        )
@@ -202,7 +257,7 @@ def send_message_interface():
             input('|| ! Invalid amount. Please enter a valid amount.')
             return
         else:
-            message = input('|| Enter the message --> ')
+            message = input(f'||{SEP}\n|| Enter your message --> ')
             session.send_message('request',
                                  {'amount': amount,
                                   'account_id': int(account_id),
@@ -214,36 +269,17 @@ def send_message_interface():
             input('|| + Request sent successfully.')
 
 
-
-
-        
-
-            
-def print_messages(message=None):
-        print(f'||{SEP}')
-        if not message:
-            for message_id, message in session.user.messages.items():
-                info, user_message = message[-1].split('Message:')
-                print(f'|| Type: {message[4]} |Id: {message_id} |Sender : {message[3]} |Date: {message[-2]}\n|| {info}\n|| Message: {user_message}')
-                print(f'||{SEP}')
-        else:
-            info, user_message = message[-1].split('Message:')
-            print(f'|| Selected Message: ')
-            print(f'|| Type: {message[4]} |Id: {message[0]} |Sender : {message[3]} |Date: {message[-2]}\n|| {info}\n|| Message: {user_message}')
-            print(f'||{SEP}')
-            
-
 def view_messages():
     session.payload['message'] = ''
     if len(session.user.messages) == 0:
         input(f'||{SEP}\n|| ! You dont have any messages.')
         return
     def choose_account():
-        print(f'||{SEP}\n|| Your Accounts: ||', end='')
-        for account in session.user.accounts.values():
-            print(f'{account} <> ', end='')
+        print(f'||{SEP}\n|| Your Accounts: ||')
+        Printer.print_accounts()
         
-        account_id = get_certain_input(message='\n|| Choose an account id -> ',
+        
+        account_id = get_certain_input(message='|| Choose an account id -> ',
                                        valid_options=[str(account_id) for account_id in session.user.accounts.keys()]
                                        )
         if not account_id:
@@ -253,7 +289,7 @@ def view_messages():
             return account_id
 
     def examine_message(message):
-        print_messages(message)
+        Printer.print_messages(message)
         
         if message[4] == 'request':
             print('|| Accept Request [1]\n|| Reject Request [2]\n|| Delete Message [3]\n|| Cancel Selection [0]')
@@ -261,8 +297,11 @@ def view_messages():
             
             if choice == '1':
                 selected_account = choose_account()
-                return None if selected_account is None else session.accept_request(message[0], int(selected_account))
-                input(f'|| ! Request {message[0]} accepted succesfully')
+                if selected_account is None:
+                    return None
+                else:
+                    session.accept_request(message[0], int(selected_account))
+                    input(f'|| + Request {message[0]} accepted succesfully')
             elif choice == '2':
                 session.reject_request(message[0])
                 input(f'|| ! Request {message[0]} succesfully rejected.')
@@ -275,12 +314,11 @@ def view_messages():
             
             if choice == '1':
                 session.user.delete_messages([message[0]])
-                
-       
+                    
     while True:
         Menu.header('MESSAGES')
         print(f'\\\\{SEP}\n|| Manage Messages: ')
-        print_messages()        
+        Printer.print_messages()        
         selected_message_id = input('|| Enter a message id for select (0 for go back) -> ')
         
         if selected_message_id == '0':
@@ -291,17 +329,11 @@ def view_messages():
             input('|| Enter a valid number.')
             
 
-def print_currencies():
-    for i, x in enumerate(CURRENCY_CODES):
-        if i % 11 == 0 and i != 0:
-            print(f'|| {x}')
-        else:
-            print(f'|| {x}', end='')
-    print()                    
+                
             
-def create_account():
+def create_account_interface():
     print(f'\\\\{SEP}\n|| Create Account:\n||{SEP}')
-    print_currencies()
+    Printer.print_currencies()
     
     chosen_currency = get_certain_input(message='|| Choose a currency_code for your new account (0 for go back)-> ',
                                         valid_options=CURRENCY_CODES + ['0'],
@@ -319,15 +351,16 @@ def create_account():
 
     
 def delete_messages_interface():
-    print_messages()
     if len(session.user.messages) == 0:
-        input('|| ! You dont have any messages.')
+        input(f'||{SEP}\n|| ! You dont have any messages.')
         return
-    print(f"""|| Enter all the message ids you want to delete with a space between them. i.e (1 21 34 483). To go back, just type 0.
-|| You can also delete with categories (e.g. 'message' or 'request' or 'feedback').""")
+    
+    Printer.print_messages()
+    print(f"""|| ? Enter all the message ids you want to delete with a space between them. i.e (1 21 34 483). To go back, just type 0.
+|| ? You can also delete with categories (e.g. 'message' or 'request' or 'feedback').""")
     
     while True:
-        valid_ids = []
+        valid_ids = set()
         deletion = input(f'||{SEP}\n|| -> ')
         if deletion.strip() == '0':
             break
@@ -341,7 +374,7 @@ def delete_messages_interface():
             break
         for message_id in deletion.split():
             if message_id.isdigit() and int(message_id) in session.user.messages:
-                valid_ids.append(int(message_id))
+                valid_ids.add(int(message_id))
         if valid_ids:
             print(f'|| {valid_ids}')
             decision = input(f'|| Are you sure want to delete these messages (1 to accept) --> ')
@@ -356,19 +389,13 @@ def delete_messages_interface():
             input('|| ! You have not entered a valid id.')
                 
         
-        
-        
-                
-            
-
-    
-def view_accounts():
+def view_accounts_interface():
     def account_options(account):
-        print_accounts(account)
+        Printer.print_accounts(account)
         print(f'||{SEP}\n|| Change Currency  [1]\n|| Delete Account   [2]\n|| Cancel Selection [0]')
         choice = input('|| --> ')
         if choice == '1':
-            print_currencies()
+            Printer.print_currencies()
             chosen_currency = input(f'||{SEP}\n|| Choose a currency --> ').upper()
             if chosen_currency in CURRENCY_CODES:
                 session.user.change_account_currency(account.account_id, chosen_currency)
@@ -395,7 +422,7 @@ def view_accounts():
             return
         
     while True: 
-        print_accounts(clear_terminal=True)
+        Printer.print_accounts(clear_terminal=True)
         selected_account_id = input(f'||{SEP}\n|| Enter the account id for select (0 for go back) -> ')
                                                 
         if selected_account_id == '0':
@@ -407,7 +434,7 @@ def view_accounts():
 
         
     
-def make_transfer():
+def make_transfer_interface():
     def choose_receiver_id(account_id):
         receiver_id = input('|| Enter a receiver account id -> ')
         if receiver_id.isdigit() and \
@@ -419,7 +446,7 @@ def make_transfer():
         
     while True:
         Menu.header('TRANSFER')
-        print_accounts()
+        Printer.print_accounts()
         account_id = get_certain_input(message='|| Enter the account ID  (0 to go back) -> ',
                                        valid_options=[str(account_id) for account_id in session.user.accounts.keys()] + ['0']
                                        )
@@ -453,7 +480,7 @@ def make_transfer():
         
     
 
-def view_transactions():
+def view_transactions_interface():
     def print_transactions(account):
         Menu.header('TRANSACTIONS')
         print(f'||{SEP}')
@@ -461,7 +488,7 @@ def view_transactions():
             print(transaction)
     
     while True:
-        print_accounts(clear_terminal=True)
+        Printer.print_accounts(clear_terminal=True)
         
         account_id = get_certain_input(message='|| Choose an account id (0 to go back) -> ',
                                     valid_options=[str(account_id) for account_id in session.user.accounts.keys()] + ['0']
@@ -472,8 +499,11 @@ def view_transactions():
             break
         else:
             account = session.user.accounts.get(int(account_id))
-            print_transactions(account)
-            input('|| Press enter to go back')
+            if len(account.transactions) == 0:
+                input('|| ! This account has no transaction.')
+            else:
+                print_transactions(account)
+                input('|| Press enter to go back')
             
 
 def login_interface():
@@ -488,6 +518,9 @@ def login_interface():
 
 def register_interface():
     print(f'//{SEP}\n|| Register :')
+    print(session.database._validate_username.__doc__)
+    print(session.database._validate_password.__doc__)
+    print(session.database._validate_email.__doc__)
     username = input('|| Username (a-Z, 0-9) -> ')
     password = getpass('|| Password (^4, a-Z, 0-9) -> ')
     password_again = getpass('|| Password (again) -> ')
@@ -501,29 +534,26 @@ def register_interface():
     
 def bank_status_interface():
     print(f'//{SEP}\n|| Bank Status :')
-    print(f'|| ID: {session.bank.bank_id}\n|| Database: {session.database.db_path}')
-    print(f'|| Users: {session.bank.users}')
-    input(f'||\n\\\\ + Press Enter to continue: ')
-
-
-                
-
+    for key, value in zip(['ID', 'Database', 'Users'], [session.bank.bank_id, session.database.db_path, session.bank.users]):
+        print(f'|| {key}: {value}')
+    input(f'||{SEP}\n|| + Press Enter to continue: ')
+    
+    
 def bank_choice_interface():
     while True:
         Menu.header('START')
-        print(rf'\\{SEP}')
-        for bank_id, bank_name in session.database.banks.items():
-            print(f'|| {bank_name} >< Id: {bank_id}')
-        print(f'||{SEP}')
-        
-        try:
-            bank_id = int(input('|| Choose a bank id -> '))
-            if bank_id not in session.database.banks.keys():
-                raise ValueError('Invalid number')
-        except ValueError:
+        Printer.print_banks()    
+        bank_id = get_certain_input(message='|| Choose a bank id to connect -> ', 
+                                    valid_options=[str(bank_id) for bank_id in session.database.banks]
+                                    )
+        if not bank_id:
             input('|| ! Please enter a valid bank id.')
         else:
-            session.connect_bank(bank_id)
+            session.connect_bank(int(bank_id))
             break
-    
 
+def main():
+    Menu.starter()
+    bank_choice_interface()
+    main_menu()
+    

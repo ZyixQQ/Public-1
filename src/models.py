@@ -15,7 +15,7 @@ from exceptions import SessionError, UserNotExistError
 from currency import exchange_rate, get_currencies
 from os import getenv
 from dotenv import load_dotenv
-from re import findall
+from re import findall, compile, match
 load_dotenv()
 
 class Session:
@@ -67,25 +67,11 @@ class Session:
         check_users_cache = '''
         SELECT * FROM user_cache WHERE user_id = ?
         '''
-        
-
-        create_user_cache_table = '''
-        INSERT INTO user_cache (user_id, message_count, last_transfer_id) VALUES (?, ?, ?);
-        '''
         update_user_cache_table = '''
-        UPDATE user_cache SET message_count = ? AND last_transfer_id = ? WHERE user_id = ?;
+        UPDATE user_cache SET message_count = ? WHERE user_id = ?;
         '''
-        
-        self.database.cursor.execute(check_users_cache,
-                                     (self.user.user_id,)
-                                     )
-        if self.database.cursor.fetchone() is None:
-            self.database.cursor.execute(create_user_cache_table,
-                                         (self.user.user_id, len(self.user.messages), max(self.user.messages)))
-        else:
-            self.database.cursor.execute(update_user_cache_table,
-                                (len(self.user.messages), self.user.user_id, max(self.user.messages)))
-                                
+        self.database.cursor.execute(update_user_cache_table,
+                                (len(self.user.messages), self.user.user_id))                     
         self.database.conn.commit()
         self.user = None
     
@@ -111,26 +97,7 @@ class Session:
             self.payload['message'] = f'You have {len(self.user.messages) - message_count[0]} new message.'
         else:
             self.payload['message'] = ''
-'''        
-        self.database.cursor.execute(get_trasnfer_id_cache,
-                                     (self.user.user_id,)
-                                     )
-        last_transfer_id = self.database.cursor.fetchone()
-        
-        if not last_transfer_id:
-            self.payload['transfer'] = ''
-        elif last_transfer_id[0]:
-            self.database.cursor.execute(get_last_transfer_table,
-                                        (self.user.user_id, last_transfer_id, 'transfer')
-                                        )
-            last_transfers = self.database.cursor.fetchall()
-            if last_transfers:
-                # There are new messages 
-                self.payload['transfer'] = f'< You have {len(last_transfers)} new transfers.'
-            else:
-                self.payload['transfer'] = ''
-'''        
-            
+
         
         
             
@@ -164,17 +131,21 @@ class Session:
         '''
 
         try:
-            self.database.db_create_user(self.bank.bank_id, 
-                                         username, 
-                                         password, 
-                                         email
-                                         )
+            response = self.database.db_create_user(self.bank.bank_id, 
+                                                    username, 
+                                                    password, 
+                                                    email
+                                                    )
         except sqlite3.IntegrityError:
             return False, '\\\\ ! There is already a user with this username please choose another username.'
-            return False
         except Exception as e:
             return False, f'\\\\ ! Error occured while creating new user: {e}'
-        return True, f'\\\\ + New user created -> {username}'
+            
+        else:
+            if response == True:
+                return True, f'|| + New user created -> {username}'
+            else:
+                return False, f'|| ! {response[1]} does not meet requirements'
     
     
     @manage_loading(5, '|| Extracting all user data')   
@@ -351,7 +322,7 @@ class Session:
                 self.initiate_transfer(actual_amount,
                                        sender_account_id,
                                        request_info.get('requestor_account_id'))
-                self.user.delete_message([request_id])
+                self.user.delete_messages([request_id])
                 self.send_feedback(request_info.get('requestor_id'), 
                                    request_id,
                                    request_info, 
@@ -371,7 +342,7 @@ class Session:
                            message,
                            acceptance_status=False
                            )
-        self.user.delete_message([request_id])
+        self.user.delete_messages([request_id])
         
         
         
@@ -425,8 +396,43 @@ class Database:
                      for bank 
                      in self._db_get_banks()}
         return bank_dict
-
     
+    def _validate_username(self, username):
+        '''\
+        Username Requirements:
+            At least 4 chracthers
+            At least 1 letter
+            Should start with a letter
+        '''
+        pattern = r'^[a-zA-Z]\S{2,}$'
+        return bool(match(pattern, username))
+        
+        
+            
+    def _validate_password(self, password):
+        '''\
+        Password Requirements:
+            At least 8 chrachters
+            At least 1 lowercase letter
+            At least 1 uppercase letter
+            At least 1 number
+        '''
+        pattern = compile(r'^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)(?=.*[!@#$%^&*()-_=+[\]{}|;:\'",.<>?/]).{8,}$')
+        return bool(match(pattern, password))
+    
+    def _validate_email(self, email):
+        '''\
+        Email Requirements:
+            Only @ and . characters can be used.
+            It must not contain gaps.
+            Domain extension must be at least 2 letters
+            example: username@email_provider.domain_extension
+        '''
+        
+        pattern = compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
+        return bool(match(pattern, email))
+        
+        
     def db_create_tables(self):
         '''
         This method creates required tables and applies initial actions.
@@ -495,7 +501,6 @@ class Database:
         CREATE TABLE IF NOT EXISTS user_cache (
             user_id INTEGER,
             message_count INTEGER DEFAULT 0,
-            last_transfer_id INTEGER DEFAULT 0,
             FOREIGN KEY (user_id) REFERENCES users(id)
         );
         '''
@@ -541,6 +546,12 @@ class Database:
         Passwords are saved after hashing.
         '''
         
+        #if self._validate_username(username) == False:
+        #    return False, 'username'
+        #elif self._validate_password(password) == False:
+        #    return False, 'password'
+        #elif self._validate_email(email) == False:
+        #    return False, 'email'
         
         create_user = '''
         INSERT INTO users (bank_id, username, password, email) VALUES (?, ?, ?, ?);
@@ -552,8 +563,14 @@ class Database:
         create_account = '''
         INSERT INTO accounts (user_id) VALUES (?);
         '''
+        
+        create_cache = '''
+        INSERT INTO user_cache (user_id) VALUES (?);
+        '''
         self.cursor.execute(create_account, (user_id,))
+        self.cursor.execute(create_cache, (user_id,))
         self.conn.commit()
+        return True
     
     
     def db_create_account(self, 
@@ -577,10 +594,6 @@ class Database:
         
         self.conn.commit()
         
-        
-    
-
-
     def db_authenticate_user(self, 
                              bank_id: int,
                              username: str, 

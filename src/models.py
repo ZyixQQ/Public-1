@@ -255,9 +255,10 @@ class Session:
                      receiver_id: int
                      ):
         templates = {
-            'request': 'User with id <{id}>, named <{name}>, is requesting <{amount}-{currency_code}> for their account with id <{account_id}> from you. Message: {message}',
-            'message' : 'User with id <{id}> named <{name}> has a message for you. Message: {message}',
-            'transfer': 'User with id <{id}> named <{name}> transferred <{amount}-{currency_code}> to your account with id <{account_id}>. Message: {message}'
+            'request': 'User with id <{id}>, named <{name}>, is requesting <{amount}-{currency_code}> for their account with id <{account_id}> from you. @Message: {message}',
+            'message' : 'User with id <{id}> named <{name}> has a message for you. @Message: {message}',
+            'transfer': 'User with id <{id}> named <{name}> transferred <{amount}-{currency_code}> to your account with id <{account_id}>. @Message: {message}',
+            'reply': 'User with id <{id}> named <{name}> replied to your {message_type} with id <{message_id}>. @Message: {replied_message} @Message: {message}'
         }
         
         send_message_table = '''
@@ -277,6 +278,30 @@ class Session:
                                      )
         self.database.conn.commit()
     
+    def send_reply(self, message_id, new_message):
+        pattern = r'<(.*?)>'
+        message = self.user.messages.get(message_id)
+        message_text = message[-1].split('@Message:')
+
+        replied_message = message_text[-1]
+        receiver_id = int(findall(pattern, message_text[0])[0])
+        
+        reply_info = dict()
+        
+        reply_info = {
+            'message_id': message_id,
+            'replied_message': replied_message,
+            'message': new_message,
+            'message_type': message[4]
+        }
+        
+        self.send_message('reply', reply_info, receiver_id)
+                
+        
+        
+        
+        
+        
     @login_required
     def extract_request_information(self, request_id):
         request_information = {}
@@ -353,8 +378,8 @@ class Session:
         '''
 
         feedback_template = {
-            True: 'Your request worth {amount}-{currency_code} with {request_id} id has been accepted by {sender_name}. Message: {message}',
-            False: 'Your request worth {amount}-{currency_code} with {request_id} id has been rejected by {sender_name}. Message: {message} '
+            True: 'Your request worth {amount}-{currency_code} with {request_id} id has been accepted by {sender_name} with id <{sender_id}>. @Message: {message}',
+            False: 'Your request worth {amount}-{currency_code} with {request_id} id has been rejected by {sender_name} with id <{sender_id}>. @Message: {message} '
         }
         self.database.cursor.execute(send_feedback_table,
                                      (receiver_id,
@@ -365,6 +390,7 @@ class Session:
                                                                                       currency_code=request_info.get('requestor_currency_code'),
                                                                                       request_id=request_id,
                                                                                       sender_name=self.user.username,
+                                                                                      sender_id=self.user.user_id,
                                                                                       message=message
                                                                                       )
                                         )
@@ -373,7 +399,36 @@ class Session:
         self.database.conn.commit()                      
                                       
                                       
+    def _delete_current_user(self):
+        delete_user_from_db_table = '''
+        DELETE FROM users WHERE user_id = ?;
+        '''
+        
+        delete_user_messages_table = '''
+        DELETE FROM user_messages WHERE user_id = ?;
+        '''
+        
+        delete_user_accounts_table = '''
+        DELETE FROM accounts WHERE user_id = ?;
+        '''
+        
+        delete_user_cache_table = '''
+        DELETE FROM user_cache WHERE user_id = ?;
+        '''
+        
+        
+        for table in (delete_user_cache_table,
+                      delete_user_accounts_table,
+                      delete_user_messages_table,
+                      delete_user_from_db_table
+                      ):
+            self.database.cursor.execute(table,
+                                         (self.user.user_id,)
+                                         )
+        self.database.conn.commit()
+        self.logout()
 
+        
 class Database:
     '''
     This class manages database operations.
@@ -400,9 +455,9 @@ class Database:
     def _validate_username(self, username):
         '''\
         Username Requirements:
-            At least 4 chracthers
-            At least 1 letter
-            Should start with a letter
+           # At least 4 chracthers
+           # At least 1 letter
+           # Should start with a letter
         '''
         pattern = r'^[a-zA-Z]\S{2,}$'
         return bool(match(pattern, username))
@@ -412,10 +467,10 @@ class Database:
     def _validate_password(self, password):
         '''\
         Password Requirements:
-            At least 8 chrachters
-            At least 1 lowercase letter
-            At least 1 uppercase letter
-            At least 1 number
+           # At least 8 chrachters
+           # At least 1 lowercase letter
+           # At least 1 uppercase letter
+           # At least 1 number
         '''
         pattern = compile(r'^(?=.*[A-Z])(?=.*[a-z])(?=.*\d)(?=.*[!@#$%^&*()-_=+[\]{}|;:\'",.<>?/]).{8,}$')
         return bool(match(pattern, password))
@@ -423,10 +478,10 @@ class Database:
     def _validate_email(self, email):
         '''\
         Email Requirements:
-            Only @ and . characters can be used.
-            It must not contain gaps.
-            Domain extension must be at least 2 letters
-            example: username@email_provider.domain_extension
+           # Only @ and . characters can be used.
+           # It must not contain gaps.
+           # Domain extension must be at least 2 letters
+           # example: username@email_provider.domain_extension
         '''
         
         pattern = compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
@@ -546,12 +601,12 @@ class Database:
         Passwords are saved after hashing.
         '''
         
-        #if self._validate_username(username) == False:
-        #    return False, 'username'
-        #elif self._validate_password(password) == False:
-        #    return False, 'password'
-        #elif self._validate_email(email) == False:
-        #    return False, 'email'
+        if self._validate_username(username) == False:
+            return False, 'username'
+        elif self._validate_password(password) == False:
+            return False, 'password'
+        elif self._validate_email(email) == False:
+            return False, 'email'
         
         create_user = '''
         INSERT INTO users (bank_id, username, password, email) VALUES (?, ?, ?, ?);
@@ -899,17 +954,45 @@ class User:
             del self.messages[message_id]
         self.database.conn.commit()
         
+    def change_profile_attribute(self, 
+                                 new_attribute, 
+                                 *,
+                                 type: str
+                                 ):
+        change_tables = {
+            'name': (self.database._validate_username, 'UPDATE users SET username = ? WHERE user_id = ?;'),
+            'email': (self.database._validate_email, 'UPDATE users SET email = ? WHERE user_id = ?;')
+        }
+
+        validator, table = change_tables.get(type)
+
+        if validator(new_attribute) == False:
+            return False
+
+        self.database.cursor.execute(table, 
+                                     (new_attribute,
+                                      self.user_id
+                                      )
+                                     )
+        self.database.conn.commit()
+        if type == 'name':
+            self.username = new_attribute
+        elif type == 'email':
+            self.email = new_attribute
+
+        
 
 
     def change_account_currency(self, account_id, new_currency_code):   
         account = self.accounts.get(account_id)
         current_currency = account.currency_code
         
-        rate = exchange_rate(current_currency, new_currency_code)
+        if account._balance > 1:
+            rate = exchange_rate(current_currency, new_currency_code)
+            new_balance = round(rate * float(account._balance), 2)
+            account._balance = new_balance    
         
-        new_balance = round(rate * float(account._balance), 2)
         
-        account._balance = new_balance
         account.currency_code = new_currency_code
         
         change_account_currency_table = '''
@@ -917,7 +1000,7 @@ class User:
         '''
         
         self.database.cursor.execute(change_account_currency_table,
-                                     (new_currency_code, new_balance, account_id)
+                                     (new_currency_code, account._balance, account_id)
                                      )
         self.database.conn.commit()
     

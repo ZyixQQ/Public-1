@@ -1,7 +1,7 @@
-'''
+"""
 Currency Module for the Bank Simulator
 This Module provides up-to-date financial values for the bank.
-'''
+"""
 
 from decos import limit_by_second
 from dotenv import load_dotenv

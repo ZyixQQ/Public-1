@@ -1,4 +1,6 @@
-"""Special loggers for daily logging"""
+"""
+Special loggers for daily logging.
+"""
 
 import logging
 from datetime import datetime

@@ -1,4 +1,7 @@
-"""Decorator source for Bank project"""
+"""
+Decorator source for Bank project.
+"""
+
 from functools import wraps
 from exceptions import SessionError
 from time import sleep, time

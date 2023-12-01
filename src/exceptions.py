@@ -1,4 +1,6 @@
-"""Custom Exception for some specific cases"""
+"""
+Custom Exception for some specific cases.
+"""
 from loggers import error_logger, info_logger
 
 

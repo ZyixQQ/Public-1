@@ -438,8 +438,10 @@ class Database:
     def __init__(self, 
                  db_path: str
                  ) -> None:
-        self.conn = sqlite3.connect(Path(__file__).parent.parent / 'Databases' / db_path)
-        self.cursor = self.conn.cursor()
+        # Veritabanı klasörünü oluştur
+        db_file = Path(__file__).parent.parent / 'Databases' / db_path
+        db_file.parent.mkdir(parents=True, exist_ok=True)  # klasör yoksa oluştur
+        self.conn = sqlite3.connect(db_file)
         self.hasher = PasswordHasher()
         self.db_path = db_path
         self.message_types = {'1': 'message', '2': 'request'}

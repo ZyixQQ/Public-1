@@ -417,7 +417,8 @@ def delete_messages_interface():
         Printer.print_messages()
         
         print(f'|| ? Enter all the message ids you want to delete with a space between them. i.e (1 21 34 483). To go back, just type 0.')
-        print(f'|| ? You can also delete with categories (e.g. 'message' or 'request' or 'feedback').')
+        print(f'|| ? You can also delete with categories (e.g. "message" or "request" or "feedback").')
+
         
         
         deletion = input(f'{SEP_N}|| -> ')
@@ -639,3 +640,4 @@ def main():
 if __name__ == '__main__':
 
     main()
+
